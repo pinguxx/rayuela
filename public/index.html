@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>🪙 Rayuela Mexicana — El Cajón de Barro</title>
+  
+  <meta name="description" content="El tradicional juego mexicano de cantina de precisión con monedas. Multijugador en tiempo real con Rust, WebSockets y física en 2.5D.">
+  <meta name="theme-color" content="#1a0f08">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Cinzel:wght@700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🪙</div>
+      <div class="brand-title">
+        <h1>RAYUELA</h1>
+        <span>El Cajón de Barro</span>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <div id="room-badge" class="room-badge" title="Toca para ver el Código QR y compartir">
+        <span>SALA:</span> <span id="room-badge-code">----</span> 📱
+      </div>
+      <button id="btn-toggle-sound" class="btn-icon" title="Sonido">🔊</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main>
+
+    <!-- Floating Banter Bubble -->
+    <div id="banter-bubble" class="banter-bubble-overlay"></div>
+
+    <!-- 1. LOBBY SCREEN -->
+    <section id="screen-lobby" class="screen active">
+      <div class="cantina-banner-card">
+        <h2>Tradición de Cantina</h2>
+        <p class="subtitle">Afina la puntería, mide el tiro y plana la moneda en la mera raya.</p>
+
+        <!-- Player Name -->
+        <div class="form-group">
+          <label for="input-player-name">Tu Nombre o Apodo</label>
+          <input type="text" id="input-player-name" class="form-control" maxlength="16" placeholder="Ej. El Charro, Don Ramón..." value="Jugador 1">
+        </div>
+
+        <!-- Avatar Selection -->
+        <div class="form-group">
+          <label>Elige tu Avatar</label>
+          <div id="avatar-grid" class="avatar-grid"></div>
+        </div>
+
+        <!-- Color Selection -->
+        <div class="form-group">
+          <label>Color de Ficha</label>
+          <div id="color-picker-row" class="color-picker-row"></div>
+        </div>
+
+        <!-- Coin Skin Selection -->
+        <div class="form-group">
+          <label>Estilo de Moneda</label>
+          <div class="skin-selector">
+            <div class="skin-card" data-skin="centenario">
+              <div class="skin-icon">🪙</div>
+              <div class="skin-info">
+                <h4>Centenario</h4>
+                <p>Oro 50 Pesos</p>
+              </div>
+            </div>
+            <div class="skin-card" data-skin="diez_pesos">
+              <div class="skin-icon">🟡</div>
+              <div class="skin-info">
+                <h4>Diez Pesos</h4>
+                <p>Piedra del Sol</p>
+              </div>
+            </div>
+            <div class="skin-card" data-skin="plata_zapata">
+              <div class="skin-icon">⚪</div>
+              <div class="skin-info">
+                <h4>Plata Zapata</h4>
+                <p>Ley 0.720</p>
+              </div>
+            </div>
+            <div class="skin-card" data-skin="bronce_cantina">
+              <div class="skin-icon">🟤</div>
+              <div class="skin-info">
+                <h4>Ficha Cantina</h4>
+                <p>Bronce Clásico</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Match Options -->
+        <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <label for="select-target-points">Meta de Puntos</label>
+            <select id="select-target-points" class="form-control">
+              <option value="11">Rápida (11 pts)</option>
+              <option value="15" selected>Estándar (15 pts)</option>
+              <option value="21">Larga (21 pts)</option>
+            </select>
+          </div>
+          <div>
+            <label for="select-throws-per-round">Tiros x Ronda</label>
+            <select id="select-throws-per-round" class="form-control">
+              <option value="1">1 moneda</option>
+              <option value="2" selected>2 monedas</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="select-turn-timer">Límite por Turno</label>
+          <select id="select-turn-timer" class="form-control">
+            <option value="15">15 segundos</option>
+            <option value="20" selected>20 segundos (Recomendado)</option>
+            <option value="30">30 segundos</option>
+            <option value="0">Sin límite</option>
+          </select>
+        </div>
+
+        <!-- Lobby Action Buttons -->
+        <div class="lobby-actions">
+          <button id="btn-create-room" class="btn-primary">
+            <span>✨</span> Crear Sala de Cantina
+          </button>
+
+          <div style="text-align:center;color:#78350f;font-size:12px;margin:4px 0;">— O ÚNETE CON UN CÓDIGO —</div>
+
+          <div class="join-row">
+            <input type="text" id="input-room-code" class="form-control" maxlength="6" placeholder="CÓDIGO">
+            <button id="btn-join-room" class="btn-secondary" style="min-width:110px;">Unirse</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. ROOM WAITING SCREEN -->
+    <section id="screen-room-waiting" class="screen">
+      <div class="room-dashboard-grid">
+        
+        <!-- Players in room -->
+        <div class="panel-wood">
+          <h3>
+            <span>Jugadores en la Mesa</span>
+            <span style="font-size:12px;color:#a8a29e;">Máximo 8</span>
+          </h3>
+          <div id="waiting-players-list" class="players-list"></div>
+          
+          <button id="btn-add-bot" class="btn-secondary" style="width:100%;margin-top:12px;">
+            🤖 Agregar Bot Mexicano
+          </button>
+        </div>
+
+        <!-- Room Information & Rules -->
+        <div class="panel-wood">
+          <h3>Detalles de la Partida</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.5;color:#e2e8f0;">
+            <div>🏷️ <strong>Código de Sala:</strong> <span id="waiting-room-code-display" style="color:var(--gold-glow);font-size:16px;font-weight:700;">----</span></div>
+            <div>🎯 <strong>Meta de Victoria:</strong> <span id="waiting-target-display">15 pts</span></div>
+            <div>⏱️ <strong>Tiempo de Turno:</strong> <span id="waiting-timer-display">20s</span></div>
+            <div>📦 <strong>Cancha:</strong> Cajón de Barro tradicional (3.75m al centro)</div>
+            
+            <div style="background:#100703;padding:10px;border-radius:6px;border-left:3px solid var(--gold-centenario);margin-top:6px;">
+              <strong style="color:var(--gold-glow);">Puntajes de Cantina:</strong><br>
+              🎯 <strong>Rayada (en la línea):</strong> 3 pts<br>
+              ⭐ <strong>Clavada (en barro):</strong> 5 pts<br>
+              📏 <strong>Moneda más cercana:</strong> 1 pt<br>
+              💥 <strong>Carambolas y Knockouts:</strong> ¡Válidos!
+            </div>
+
+            <button id="btn-start-game" class="btn-primary" style="margin-top:12px;">
+              🚀 ¡Iniciar Partida!
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 3. GAMEPLAY ARENA SCREEN -->
+    <section id="screen-game" class="screen">
+      <div class="arena-layout">
+
+        <!-- Chalkboard Scoreboard -->
+        <aside class="chalkboard-container">
+          <div class="chalkboard-header">
+            <h3 id="scoreboard-round">Ronda 1</h3>
+            <div class="chalkboard-sub">
+              <span id="scoreboard-target">Meta: 15 pts</span>
+              <span>Pizarra de Cantina</span>
+            </div>
+          </div>
+
+          <!-- Active Thrower Banner -->
+          <div style="text-align:center;padding:4px;">
+            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;">TURNO ACTUAL:</div>
+            <div id="active-thrower-name" style="font-size:16px;font-weight:700;color:var(--gold-glow);">Esperando...</div>
+          </div>
+
+          <div id="turn-timer" class="turn-timer-badge">⏱️ 20s</div>
+
+          <!-- Scores Table -->
+          <div id="scoreboard-table" class="scoreboard-table"></div>
+        </aside>
+
+        <!-- 2.5D Canvas Viewport -->
+        <div class="canvas-viewport-wrapper">
+          <canvas id="rayuela-canvas"></canvas>
+
+          <!-- Bottom Throw Controls Bar -->
+          <div class="pitch-controls-bar">
+            
+            <div class="throw-feedback-indicators">
+              <span>Ángulo: <strong id="val-angle">0.0°</strong></span>
+              <span>Fuerza: <strong id="val-power">0%</strong></span>
+            </div>
+
+            <div class="power-meter-container">
+              <span style="font-size:11px;color:#a8a29e;">SUAVE</span>
+              <div class="power-meter-track">
+                <div class="power-meter-target-zone" title="Zona ideal de la raya"></div>
+                <div id="power-meter-fill" class="power-meter-fill"></div>
+              </div>
+              <span style="font-size:11px;color:#a8a29e;">FUERTE</span>
+            </div>
+
+            <div class="flick-instruction">
+              👆 Desliza tu dedo hacia adelante o arrastra hacia atrás para lanzar tu moneda
+            </div>
+
+            <!-- Cantina Quick Reactions -->
+            <div class="reactions-bar">
+              <button class="btn-reaction" data-text="¡Esa raya es mía!" data-emoji="🎯">🎯 ¡Esa raya es mía!</button>
+              <button class="btn-reaction" data-text="¡A su mecha, qué tiro!" data-emoji="🔥">🔥 ¡A su mecha!</button>
+              <button class="btn-reaction" data-text="¡Soplale, soplale!" data-emoji="💨">💨 ¡Soplale!</button>
+              <button class="btn-reaction" data-text="¡Mídela con billete!" data-emoji="📏">📏 ¡Mídela!</button>
+              <button class="btn-reaction" data-text="¡El que pierde paga la ronda!" data-emoji="🍺">🍺 ¡Paga la ronda!</button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL 1: FOTO-FINISH & VEREDICTO -->
+  <div id="modal-foto-finish" class="modal-overlay">
+    <div class="modal-card">
+      <h2>📸 Foto-Finish & Veredicto</h2>
+      <div id="verdict-banner" class="verdict-banner"></div>
+      
+      <div style="font-size:13px;color:#a8a29e;margin-bottom:8px;">PUNTOS ASIGNADOS ESTA TANDA:</div>
+      <div id="awards-list" class="awards-list"></div>
+
+      <button id="btn-next-round" class="btn-primary" style="width:100%;margin-top:16px;">
+        ➡️ Siguiente Ronda
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL 2: VICTORIA Y PODIO -->
+  <div id="modal-victory" class="modal-overlay">
+    <div class="modal-card">
+      <div id="victory-podium"></div>
+      <div id="victory-stats"></div>
+
+      <div style="display:flex;gap:10px;margin-top:20px;">
+        <button id="btn-download-trophy" class="btn-secondary" style="flex:1;">
+          🖼️ Guardar Trofeo
+        </button>
+        <button id="btn-play-again" class="btn-primary" style="flex:1;">
+          🔄 Jugar de Nuevo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: QR CODE INVITE -->
+  <div id="modal-qr" class="modal-overlay">
+    <div class="modal-card" style="max-width:380px;">
+      <h2>📱 Invitar a la Mesa</h2>
+      <p style="font-size:12px;color:#a8a29e;margin-bottom:16px;">Escanea este código con la cámara de tu celular para unirte directamente.</p>
+
+      <div id="qr-code-target" style="display:flex;justify-content:center;margin:12px 0;"></div>
+
+      <div class="form-group" style="margin-top:16px;">
+        <input type="text" id="share-url-text" class="form-control" readonly style="font-size:11px;text-align:center;">
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="btn-copy-url" class="btn-primary" style="flex:1;">📋 Copiar Enlace</button>
+        <button id="btn-close-qr" class="btn-secondary" style="flex:1;">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="qrcode.min.js"></script>
+  <script src="audio.js"></script>
+  <script src="app.js"></script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
