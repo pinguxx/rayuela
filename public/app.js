@@ -1498,9 +1498,15 @@
     // --- Vibrant & Distinct Coin Drawing ---
     function drawPerspectiveCoin(ctx, x, y, scale, coin, inAir = false, tiltY = 1.0, spinAngle = 0) {
         ctx.save();
-        const isMobileScreen = canvas && (canvas.width / (window.devicePixelRatio || 1) < 650);
-        const baseR = isMobileScreen ? 27 : 21;
-        const r = baseR * scale;
+        const canvasW = canvas ? (canvas.width / (window.devicePixelRatio || 1)) : 800;
+        const canvasH = canvas ? (canvas.height / (window.devicePixelRatio || 1)) : 600;
+        const isMobileScreen = canvasW < 650 || (canvasW / canvasH < 0.9);
+        const lateralFactor = isMobileScreen ? 0.94 : 0.42;
+
+        // 1:1 physical calibration: COIN_RADIUS is 0.055m in physics.rs
+        const COIN_PHYSICAL_RADIUS = 0.055;
+        const physicalRadiusPx = COIN_PHYSICAL_RADIUS * (canvasW * lateralFactor) * scale;
+        const r = Math.max(11, physicalRadiusPx);
         const ry = r * 0.52 * tiltY; // Vertical foreshortening + 3D tumbling tilt
 
         const playerColor = coin.color || '#f59e0b';
@@ -1726,7 +1732,7 @@
         if (currentRoom && currentRoom.current_round_coins) {
             currentRoom.current_round_coins.forEach(coin => {
                 const cp = worldToScreenOverhead(coin.x, coin.y, w, h);
-                const r = 18;
+                const r = Math.max(12, 0.055 * boxW);
 
                 // Caliper laser line to center line
                 const lineTargetP = worldToScreenOverhead(coin.x, 3.75, w, h);
