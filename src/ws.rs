@@ -350,6 +350,25 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                                         BOT_PROFILES[idx]
                                     });
 
+                                let used_colors: Vec<String> = room.players.iter().map(|p| p.color.clone()).collect();
+                                let bot_color = if !used_colors.iter().any(|c| c.eq_ignore_ascii_case(b_color)) {
+                                    b_color.to_string()
+                                } else {
+                                    PLAYER_COLORS
+                                        .iter()
+                                        .find(|c| !used_colors.iter().any(|u| u.eq_ignore_ascii_case(c)))
+                                        .copied()
+                                        .unwrap_or(b_color)
+                                        .to_string()
+                                };
+
+                                let bot_skin = match room.players.len() % 4 {
+                                    0 => "centenario",
+                                    1 => "diez_pesos",
+                                    2 => "plata_zapata",
+                                    _ => "bronce_cantina",
+                                };
+
                                 let bot_id = {
                                     let mut rng = rand::rng();
                                     format!("bot_{}", rng.random_range(1000..9999))
@@ -358,8 +377,8 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                                     id: bot_id.clone(),
                                     name: format!("{} 🤖", b_name),
                                     avatar: b_avatar.to_string(),
-                                    color: b_color.to_string(),
-                                    coin_skin: "centenario".to_string(),
+                                    color: bot_color,
+                                    coin_skin: bot_skin.to_string(),
                                     is_bot: true,
                                     bot_profile_id: Some(b_name.to_string()),
                                     is_host: false,
@@ -626,7 +645,8 @@ pub fn start_background_maintenance(state: AppState) {
                             .map(|deadline| now > deadline)
                             .unwrap_or(false);
 
-                        if is_bot || is_timed_out {
+                        // Only pitch if the previous throw has completely landed and settled!
+                        if (is_bot || is_timed_out) && now >= room.min_next_throw_unix_ms {
                             // If human timed out, bot_decide_and_throw handles it by taking over a fallback pitch
                             let active_player = room.current_active_player().cloned();
                             if let Some(player) = active_player {
@@ -672,7 +692,7 @@ pub fn start_background_maintenance(state: AppState) {
 
                 if let Some(ev) = bot_throw_to_broadcast {
                     broadcast_event(&state, &code, &ev).await;
-                    tokio::time::sleep(Duration::from_millis(600)).await;
+                    tokio::time::sleep(Duration::from_millis(2400)).await;
                     if let Some(r) = room_after {
                         if round_ended {
                             broadcast_event(&state, &code, &ServerEvent::RoundFinished { room: r }).await;

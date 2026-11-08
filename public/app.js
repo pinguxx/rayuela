@@ -1,5 +1,5 @@
 // ============================================================================
-// 🪙 RAYUELA MEXICANA — CLIENT APP & 2.5D CANVAS ENGINE
+// 🪙 RAYUELA MEXICANA — CLIENT APP & 2.5D CANVAS ENGINE (V2 FLUID & COLOR ENHANCED)
 // ============================================================================
 
 (function () {
@@ -30,7 +30,11 @@
     let ctx = null;
     let animationFrameId = null;
     let activeFlightAnimation = null;
+    let isWaitingForNextTurn = false;
     let clayParticles = [];
+    let claySkidMarks = [];
+    let cameraShakeOffset = { x: 0, y: 0 };
+    let cameraShakeTrauma = 0;
     let cameraMode = 'perspective'; // 'perspective' or 'overhead' (foto-finish)
     let cameraTransitionFrac = 0.0; // 0 = 2.5D, 1 = overhead
     let targetCameraMode = 'perspective';
@@ -50,7 +54,7 @@
     let elPlayerName, elRoomCodeInput, elBtnCreateRoom, elBtnJoinRoom;
     let elWaitingPlayersList, elBtnStartGame, elRoomBadge, elRoomBadgeCode;
     let elScoreboardTable, elTurnTimer, elActiveThrowerName;
-    let elPowerFill, elAngleValue, elPowerValue;
+    let elPowerFill, elAngleValue, elPowerValue, elFlickInstruction;
     let elModalFotoFinish, elVerdictBanner, elAwardsList, elBtnNextRound;
     let elModalVictory, elVictoryPodium, elVictoryStats, elBtnPlayAgain, elBtnDownloadTrophy;
     let elModalQr, elQrContainer, elShareUrlText, elBtnCopyUrl;
@@ -103,6 +107,7 @@
         elPowerFill = document.getElementById('power-meter-fill');
         elAngleValue = document.getElementById('val-angle');
         elPowerValue = document.getElementById('val-power');
+        elFlickInstruction = document.querySelector('.flick-instruction');
 
         elModalFotoFinish = document.getElementById('modal-foto-finish');
         elVerdictBanner = document.getElementById('verdict-banner');
@@ -201,12 +206,14 @@
         elBtnNextRound.addEventListener('click', () => {
             elModalFotoFinish.classList.remove('active');
             targetCameraMode = 'perspective';
+            claySkidMarks = [];
             sendWsAction({ action: 'next_round' });
         });
 
         elBtnPlayAgain.addEventListener('click', () => {
             elModalVictory.classList.remove('active');
             targetCameraMode = 'perspective';
+            claySkidMarks = [];
             sendWsAction({ action: 'play_again' });
         });
 
@@ -348,14 +355,19 @@
 
             case 'round_finished':
                 currentRoom = ev.room;
-                updateRoomStateUI(ev.room);
-                showFotoFinishModal(ev.room);
+                // Wait slightly if coin is currently flying before opening review
+                setTimeout(() => {
+                    updateRoomStateUI(ev.room);
+                    showFotoFinishModal(ev.room);
+                }, activeFlightAnimation ? 1200 : 300);
                 break;
 
             case 'match_finished':
                 currentRoom = ev.room;
-                updateRoomStateUI(ev.room);
-                showVictoryModal(ev.room);
+                setTimeout(() => {
+                    updateRoomStateUI(ev.room);
+                    showVictoryModal(ev.room);
+                }, activeFlightAnimation ? 1400 : 400);
                 break;
 
             case 'banter':
@@ -403,7 +415,7 @@
             card.className = `player-card-waiting ${p.id === myPlayerId ? 'is-self' : ''}`;
             card.innerHTML = `
                 <div class="player-meta">
-                    <div class="player-avatar-circle" style="border-color:${p.color}">
+                    <div class="player-avatar-circle" style="border-color:${p.color};background:${p.color}22">
                         ${p.avatar}
                     </div>
                     <div>
@@ -444,8 +456,6 @@
 
         elScoreboardTable.innerHTML = '';
 
-        const activePlayerId = (room.turn_order && room.turn_index < room.turn_order.len) ? room.turn_order[room.turn_index] : null;
-
         // Sort by score descending
         const sorted = [...room.players].sort((a, b) => b.score - a.score);
 
@@ -455,23 +465,24 @@
             row.className = `score-row ${isTurn ? 'active-turn' : ''}`;
             row.innerHTML = `
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <span style="font-size:20px;">${p.avatar}</span>
+                    <span style="font-size:22px;">${p.avatar}</span>
                     <div>
                         <div style="color:${p.color};font-weight:700;">${escapeHtml(p.name)}</div>
                         <div style="font-size:11px;color:#94a3b8;font-family:sans-serif;">Rayadas: ${p.rayadas} | Mejor: ${formatDistDisplay(p.best_distance_mm)}</div>
                     </div>
                 </div>
-                <div class="score-points">${p.score}</div>
+                <div class="score-points" style="color:${p.color}">${p.score}</div>
             `;
             elScoreboardTable.appendChild(row);
         });
     }
 
     function updateTurnHeader(room) {
-        if (room.phase !== 'throwing') {
-            elActiveThrowerName.textContent = room.phase === 'round_review' ? 'Dictamen del Cantinero...' : 'Fin de Partida';
+        if (!room || room.phase !== 'throwing') {
+            elActiveThrowerName.textContent = room && room.phase === 'round_review' ? 'Dictamen del Cantinero...' : 'Fin de Partida';
             elTurnTimer.style.display = 'none';
             clearInterval(timerInterval);
+            if (elFlickInstruction) elFlickInstruction.textContent = "Partida en pausa";
             return;
         }
 
@@ -479,11 +490,23 @@
         if (!activePlayer) return;
 
         const isMe = activePlayer.id === myPlayerId;
-        elActiveThrowerName.textContent = isMe ? '¡ES TU TURNO DE TIRAR!' : `Tira ${activePlayer.name}`;
-        elActiveThrowerName.style.color = isMe ? 'var(--gold-glow)' : activePlayer.color;
+
+        if (activeFlightAnimation !== null || isWaitingForNextTurn) {
+            elActiveThrowerName.textContent = "🪙 Moneda en movimiento...";
+            elActiveThrowerName.style.color = "var(--gold-glow)";
+            if (elFlickInstruction) elFlickInstruction.textContent = "Esperando a que la moneda se asiente en el barro...";
+        } else if (isMe) {
+            elActiveThrowerName.textContent = '¡ES TU TURNO DE TIRAR!';
+            elActiveThrowerName.style.color = activePlayer.color;
+            if (elFlickInstruction) elFlickInstruction.textContent = "👆 ¡Es tu turno! Desliza tu dedo hacia adelante o arrastra hacia atrás";
+        } else {
+            elActiveThrowerName.textContent = `Tira ${activePlayer.name}`;
+            elActiveThrowerName.style.color = activePlayer.color;
+            if (elFlickInstruction) elFlickInstruction.textContent = `⏳ ${activePlayer.name} está midiendo su tiro a la raya...`;
+        }
 
         // Turn timer
-        if (room.turn_deadline_unix_ms) {
+        if (room.turn_deadline_unix_ms && !activeFlightAnimation && !isWaitingForNextTurn) {
             elTurnTimer.style.display = 'flex';
             clearInterval(timerInterval);
             timerInterval = setInterval(() => {
@@ -503,42 +526,57 @@
         }
     }
 
-    // --- Throw Handling & Animation ---
+    // --- Throw Handling & Fluid Animation ---
     function handleThrowAnimation(ev) {
         const { sim, dicho_es } = ev;
 
         audio.playCoinFlight();
 
-        activeFlightAnimation = {
-            trajectory: sim.trajectory,
-            currentPointIdx: 0,
-            coin: sim.coin,
-            flightDurationMs: sim.flight_duration_s * 1000,
-            startTime: performance.now(),
-            onComplete: () => {
-                // Play landing sound
-                if (sim.sound_cue === 'rayada') {
-                    audio.playRayada();
-                } else if (sim.sound_cue === 'clavada') {
-                    audio.playClavada();
-                } else if (sim.sound_cue === 'knockout') {
-                    audio.playCoinKnockout();
-                } else if (sim.sound_cue === 'miss') {
-                    audio.playMiss();
-                } else {
-                    audio.playClayThud();
-                }
+        // Calculate smooth flight duration
+        const flightDurationMs = Math.max(950, Math.min(1450, sim.flight_duration_s * 1000));
+        const skidDurationMs = 380;
 
-                // Clay splatter particles
-                spawnClayParticles(sim.coin.x, sim.coin.y, sim.coin.color);
+        activeFlightAnimation = {
+            sim,
+            trajectory: sim.trajectory,
+            coin: sim.coin,
+            flightDurationMs,
+            skidDurationMs,
+            totalDurationMs: flightDurationMs + skidDurationMs,
+            startTime: performance.now(),
+            impactHandled: false,
+            skidStartX: sim.trajectory[sim.trajectory.length - 1].x,
+            skidStartY: sim.trajectory[sim.trajectory.length - 1].y,
+            onComplete: () => {
+                activeFlightAnimation = null;
+                isWaitingForNextTurn = true;
 
                 // Speak and show cantina banter
                 audio.speakDicho(dicho_es);
                 showBanterBubble(ev.player_name, ev.avatar, dicho_es, sim.coin.is_on_line ? '🎯' : '🪙');
 
-                activeFlightAnimation = null;
+                // Buffer pause: give player 1.4s to absorb where coin landed before next throw
+                setTimeout(() => {
+                    isWaitingForNextTurn = false;
+                    if (currentRoom) {
+                        updateTurnHeader(currentRoom);
+                    }
+                }, 1400);
             }
         };
+
+        if (currentRoom) {
+            updateTurnHeader(currentRoom);
+        }
+    }
+
+    function triggerCameraShake(intensity = 4) {
+        cameraShakeTrauma = intensity;
+    }
+
+    function addClaySkidMark(x1, y1, x2, y2) {
+        claySkidMarks.push({ x1, y1, x2, y2 });
+        if (claySkidMarks.length > 20) claySkidMarks.shift();
     }
 
     function showFotoFinishModal(room) {
@@ -575,12 +613,12 @@
 
         elVictoryPodium.innerHTML = `
             <div style="font-size:48px;margin-bottom:8px;">🏆</div>
-            <h3 style="color:var(--gold-glow);font-size:24px;font-family:var(--font-display);">${escapeHtml(winner.name)}</h3>
-            <p style="color:#fcd34d;font-size:14px;">¡Campeón de la Cantina con ${winner.score} puntos!</p>
+            <h3 style="color:${winner.color};font-size:26px;font-family:var(--font-display);">${escapeHtml(winner.name)}</h3>
+            <p style="color:#fcd34d;font-size:15px;margin-top:4px;">¡Campeón de la Cantina con ${winner.score} puntos!</p>
         `;
 
         elVictoryStats.innerHTML = `
-            <div style="background:#100703;padding:12px;border-radius:8px;margin-top:12px;text-align:left;font-size:13px;line-height:1.6;">
+            <div style="background:#100703;padding:14px;border-radius:8px;margin-top:14px;text-align:left;font-size:13px;line-height:1.7;border:1px solid #78350f;">
                 <div>🎯 <strong>Rayadas en la línea:</strong> ${winner.rayadas}</div>
                 <div>⭐ <strong>Clavadas de barro:</strong> ${winner.clavadas}</div>
                 <div>💥 <strong>Carambolas y Knockouts:</strong> ${winner.knockouts}</div>
@@ -621,12 +659,18 @@
 
     function isMyTurn() {
         if (!currentRoom || currentRoom.phase !== 'throwing') return false;
+        if (activeFlightAnimation !== null || isWaitingForNextTurn) return false;
         const activeId = currentRoom.turn_order[currentRoom.turn_index];
         return activeId === myPlayerId;
     }
 
     function onPointerDown(e) {
-        if (!isMyTurn() || activeFlightAnimation) return;
+        if (!isMyTurn()) {
+            if (activeFlightAnimation !== null || isWaitingForNextTurn) {
+                showToast("Espera a que la moneda se detenga en el barro");
+            }
+            return;
+        }
         isDragging = true;
         const rect = canvas.getBoundingClientRect();
         dragStartPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -663,7 +707,7 @@
         const dy = dragCurrentPos.y - dragStartPos.y;
         const totalDist = Math.sqrt(dx * dx + dy * dy);
 
-        if (totalDist > 25) {
+        if (totalDist > 25 && isMyTurn()) {
             // Execute pitch!
             sendWsAction({
                 action: 'throw_coin',
@@ -723,6 +767,20 @@
 
             ctx.clearRect(0, 0, w, h);
 
+            // Camera micro-shake damping
+            if (cameraShakeTrauma > 0) {
+                cameraShakeOffset.x = (Math.random() - 0.5) * cameraShakeTrauma;
+                cameraShakeOffset.y = (Math.random() - 0.5) * cameraShakeTrauma;
+                cameraShakeTrauma *= 0.88;
+                if (cameraShakeTrauma < 0.1) cameraShakeTrauma = 0;
+            } else {
+                cameraShakeOffset.x = 0;
+                cameraShakeOffset.y = 0;
+            }
+
+            ctx.save();
+            ctx.translate(cameraShakeOffset.x, cameraShakeOffset.y);
+
             // Smooth camera transition between 2.5D perspective and Foto-Finish overhead
             const targetFrac = targetCameraMode === 'overhead' ? 1.0 : 0.0;
             cameraTransitionFrac += (targetFrac - cameraTransitionFrac) * 0.08;
@@ -735,6 +793,7 @@
             }
 
             renderParticles();
+            ctx.restore();
         }
         animationFrameId = requestAnimationFrame(render);
     }
@@ -774,7 +833,7 @@
         ctx.stroke();
 
         ctx.fillStyle = '#fef08a';
-        ctx.font = '11px sans-serif';
+        ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('LÍNEA DE TIRO (RAYA INICIAL)', w / 2, tl1.y + 18);
 
@@ -835,104 +894,249 @@
         ctx.lineWidth = 8;
         ctx.stroke();
 
-        // 3. Render Settled Coins in the Clay
+        // 3. Render Clay Skid Marks
+        claySkidMarks.forEach(sm => {
+            const sp1 = worldToScreen25D(sm.x1, sm.y1, 0.0, w, h);
+            const sp2 = worldToScreen25D(sm.x2, sm.y2, 0.0, w, h);
+            ctx.strokeStyle = 'rgba(35, 16, 4, 0.7)';
+            ctx.lineWidth = 7 * sp1.scale;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(sp1.x, sp1.y);
+            ctx.lineTo(sp2.x, sp2.y);
+            ctx.stroke();
+        });
+
+        // 4. Render Settled Coins in the Clay
         if (currentRoom && currentRoom.current_round_coins) {
             currentRoom.current_round_coins.forEach(coin => {
                 const p = worldToScreen25D(coin.x, coin.y, coin.z, w, h);
-                drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin);
+                drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin, false, 1.0, 0);
             });
         }
 
-        // 4. Render Active In-Flight Coin
+        // 5. Render Active In-Flight / Skidding Coin (Continuous Hermite Interpolation)
         if (activeFlightAnimation) {
             const anim = activeFlightAnimation;
             const elapsed = performance.now() - anim.startTime;
-            const frac = Math.min(1.0, elapsed / anim.flightDurationMs);
+            const flightDur = anim.flightDurationMs;
 
-            const traj = anim.trajectory;
-            const pointIdx = Math.min(traj.length - 1, Math.floor(frac * (traj.length - 1)));
-            const pt = traj[pointIdx];
+            let curX, curY, curZ, tiltY, spinAngle;
 
-            // Projected shadow on ground
-            const shadowPt = worldToScreen25D(pt.x, pt.y, 0.0, w, h);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-            ctx.beginPath();
-            ctx.ellipse(shadowPt.x, shadowPt.y, 14 * shadowPt.scale, 7 * shadowPt.scale, 0, 0, Math.PI * 2);
-            ctx.fill();
+            if (elapsed < flightDur) {
+                // IN AIR FLIGHT PHASE
+                const frac = elapsed / flightDur;
 
-            // Coin in air
-            const airPt = worldToScreen25D(pt.x, pt.y, pt.z, w, h);
-            drawPerspectiveCoin(ctx, airPt.x, airPt.y, airPt.scale * 1.25, anim.coin, true);
+                // Hermite cubic smooth interpolation between trajectory points
+                const traj = anim.trajectory;
+                const totalSegs = traj.length - 1;
+                const rawIdx = frac * totalSegs;
+                const i0 = Math.floor(rawIdx);
+                const i1 = Math.min(totalSegs, i0 + 1);
+                const segFrac = rawIdx - i0;
+                const smoothT = segFrac * segFrac * (3 - 2 * segFrac); // Smoothstep
 
-            if (frac >= 1.0) {
-                anim.onComplete();
+                const p0 = traj[i0];
+                const p1 = traj[i1];
+
+                curX = p0.x + (p1.x - p0.x) * smoothT;
+                curY = p0.y + (p1.y - p0.y) * smoothT;
+                curZ = p0.z + (p1.z - p0.z) * smoothT;
+
+                // 3D tumbling & spinning
+                const flips = 4.0;
+                tiltY = Math.abs(Math.cos(frac * Math.PI * 2 * flips)) * 0.72 + 0.28;
+                spinAngle = frac * Math.PI * 4;
+
+                // Shadow projected on ground
+                const shadowP = worldToScreen25D(curX, curY, 0.0, w, h);
+                const shadowAlpha = (0.55 * (1.0 - (curZ / 1.5).clamp(0, 0.7))).clamp(0.15, 0.6);
+                ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+                ctx.beginPath();
+                ctx.ellipse(shadowP.x, shadowP.y, 16 * shadowP.scale, 8 * shadowP.scale, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Coin in air
+                const airP = worldToScreen25D(curX, curY, curZ, w, h);
+                drawPerspectiveCoin(ctx, airP.x, airP.y, airP.scale * 1.15, anim.coin, true, tiltY, spinAngle);
+
+            } else {
+                // IMPACT & SKID PHASE
+                const skidElapsed = elapsed - flightDur;
+                const skidProgress = Math.min(1.0, skidElapsed / anim.skidDurationMs);
+
+                if (!anim.impactHandled) {
+                    anim.impactHandled = true;
+
+                    // Trigger sounds
+                    if (anim.sim.sound_cue === 'rayada') {
+                        audio.playRayada();
+                    } else if (anim.sim.sound_cue === 'clavada') {
+                        audio.playClavada();
+                    } else if (anim.sim.sound_cue === 'knockout') {
+                        audio.playCoinKnockout();
+                    } else if (anim.sim.sound_cue === 'miss') {
+                        audio.playMiss();
+                    } else {
+                        audio.playClayThud();
+                    }
+
+                    // Spawn clay particles
+                    spawnClayParticles(anim.coin.x, anim.coin.y, anim.coin.color);
+
+                    // Add skid mark to wet clay
+                    addClaySkidMark(anim.skidStartX, anim.skidStartY, anim.coin.x, anim.coin.y);
+
+                    // Camera micro-shake
+                    triggerCameraShake(5);
+                }
+
+                // Cubic deceleration skid
+                const skidT = 1.0 - Math.pow(1.0 - skidProgress, 3);
+                curX = anim.skidStartX + (anim.coin.x - anim.skidStartX) * skidT;
+                curY = anim.skidStartY + (anim.coin.y - anim.skidStartY) * skidT;
+                curZ = anim.coin.z;
+                tiltY = anim.coin.status === 'clavada' ? 0.35 : 1.0;
+
+                const settledP = worldToScreen25D(curX, curY, curZ, w, h);
+                drawPerspectiveCoin(ctx, settledP.x, settledP.y, settledP.scale, anim.coin, false, tiltY, 0);
+
+                if (skidProgress >= 1.0) {
+                    anim.onComplete();
+                }
             }
         }
 
-        // 5. Aiming Sling / Trajectory Preview
-        if (isDragging) {
+        // 6. Aiming Sling / Trajectory Preview
+        if (isDragging && isMyTurn()) {
             drawAimingTrajectory(ctx, w, h);
         }
 
         ctx.restore();
     }
 
-    function drawPerspectiveCoin(ctx, x, y, scale, coin, inAir = false) {
+    // --- Vibrant & Distinct Coin Drawing ---
+    function drawPerspectiveCoin(ctx, x, y, scale, coin, inAir = false, tiltY = 1.0, spinAngle = 0) {
         ctx.save();
-        const r = 18 * scale;
+        const r = 21 * scale;
+        const ry = r * 0.52 * tiltY; // Vertical foreshortening + 3D tumbling tilt
 
-        // Shadow under coin
+        const playerColor = coin.color || '#f59e0b';
+
+        // 1. Realistic Cast Shadow on ground
         if (!inAir) {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
             ctx.beginPath();
-            ctx.ellipse(x, y + 2, r, r * 0.48, 0, 0, Math.PI * 2);
+            ctx.ellipse(x, y + 3 * scale, r * 1.08, ry * 1.08, 0, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // Gold / Bronze / Silver Gradient
-        const coinGrad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
-        if (coin.coin_skin === 'diez_pesos') {
-            coinGrad.addColorStop(0, '#fef08a');
-            coinGrad.addColorStop(0.6, '#ca8a04');
-            coinGrad.addColorStop(1, '#94a3b8');
-        } else if (coin.coin_skin === 'plata_zapata') {
-            coinGrad.addColorStop(0, '#f8fafc');
-            coinGrad.addColorStop(0.7, '#94a3b8');
-            coinGrad.addColorStop(1, '#475569');
+        // 2. Heavy Metallic Outer Bevel Rim
+        const rimGrad = ctx.createLinearGradient(x - r, y - ry, x + r, y + ry);
+        if (coin.coin_skin === 'plata_zapata') {
+            rimGrad.addColorStop(0, '#ffffff');
+            rimGrad.addColorStop(0.5, '#cbd5e1');
+            rimGrad.addColorStop(1, '#64748b');
         } else if (coin.coin_skin === 'bronce_cantina') {
-            coinGrad.addColorStop(0, '#fdba74');
-            coinGrad.addColorStop(0.7, '#c2410c');
-            coinGrad.addColorStop(1, '#7c2d12');
+            rimGrad.addColorStop(0, '#fed7aa');
+            rimGrad.addColorStop(0.5, '#c2410c');
+            rimGrad.addColorStop(1, '#7c2d12');
         } else {
-            // Centenario de Oro default
-            coinGrad.addColorStop(0, '#fef08a');
-            coinGrad.addColorStop(0.6, '#f59e0b');
-            coinGrad.addColorStop(1, '#b45309');
+            // Gold Centenario / Diez Pesos base
+            rimGrad.addColorStop(0, '#fef08a');
+            rimGrad.addColorStop(0.3, '#f59e0b');
+            rimGrad.addColorStop(0.8, '#b45309');
+            rimGrad.addColorStop(1, '#78350f');
         }
 
-        ctx.fillStyle = coinGrad;
+        ctx.fillStyle = rimGrad;
         ctx.beginPath();
-        ctx.ellipse(x, y, r, r * 0.52, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, r, ry, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Player colored rim
-        ctx.strokeStyle = coin.color;
-        ctx.lineWidth = 2.5 * scale;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.6 * scale;
         ctx.stroke();
 
-        // Inner rim engraving
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1 * scale;
+        // 3. VIBRANT PLAYER COLOR ENAMEL DISC (76% of radius)
+        // Highly visible, rich color so every player's chip is completely distinct!
+        const innerR = r * 0.76;
+        const innerRy = ry * 0.76;
+
+        const colorGrad = ctx.createRadialGradient(
+            x - innerR * 0.35, y - innerRy * 0.35, innerR * 0.1,
+            x, y, innerR
+        );
+        colorGrad.addColorStop(0, lightenColor(playerColor, 0.45));
+        colorGrad.addColorStop(0.35, playerColor);
+        colorGrad.addColorStop(1, darkenColor(playerColor, 0.45));
+
+        ctx.fillStyle = colorGrad;
         ctx.beginPath();
-        ctx.ellipse(x, y, r * 0.75, r * 0.75 * 0.52, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, innerR, innerRy, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Concentric golden accent ring inside player color field
+        ctx.strokeStyle = 'rgba(254, 240, 138, 0.85)';
+        ctx.lineWidth = 1.8 * scale;
+        ctx.beginPath();
+        ctx.ellipse(x, y, innerR * 0.70, innerRy * 0.70, 0, 0, Math.PI * 2);
         ctx.stroke();
 
-        // If touching line, golden star beacon
+        // 4. Center Emblem: Player Avatar stamped directly in center!
+        if (scale > 0.45 && tiltY > 0.45) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.max(10, Math.round(12 * scale))}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(coin.avatar || '🪙', x, y);
+        }
+
+        // 5. Specular Gloss Glint across coin face
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(x, y, innerR, innerRy, 0, 0, Math.PI * 2);
+        ctx.clip();
+        const glintGrad = ctx.createLinearGradient(x - innerR, y - innerRy, x + innerR, y + innerRy);
+        glintGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+        glintGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.1)');
+        glintGrad.addColorStop(0.55, 'transparent');
+        ctx.fillStyle = glintGrad;
+        ctx.fillRect(x - innerR, y - innerRy, innerR * 2, innerRy * 2);
+        ctx.restore();
+
+        // 6. Name Label Pill for Settled Coins on the table
+        if (!inAir && scale > 0.38) {
+            ctx.save();
+            const labelY = y - ry - (12 * scale);
+            const nameText = coin.player_name || 'Jugador';
+            ctx.font = `bold ${Math.max(9, Math.round(11 * scale))}px sans-serif`;
+            const textMetrics = ctx.measureText(nameText);
+            const pillW = textMetrics.width + (14 * scale);
+            const pillH = 14 * scale;
+
+            // Pill background matching player color
+            ctx.fillStyle = 'rgba(15, 10, 6, 0.88)';
+            ctx.strokeStyle = playerColor;
+            ctx.lineWidth = 1.8 * scale;
+            roundRect(ctx, x - pillW / 2, labelY - pillH / 2, pillW, pillH, 4 * scale);
+            ctx.fill();
+            ctx.stroke();
+
+            // Pill text
+            ctx.fillStyle = playerColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(nameText, x, labelY);
+            ctx.restore();
+        }
+
+        // 7. Golden Star / Beacon if touching the line!
         if (coin.is_on_line) {
             ctx.fillStyle = '#fbbf24';
-            ctx.font = `${Math.max(10, Math.round(12 * scale))}px sans-serif`;
+            ctx.font = `${Math.max(12, Math.round(16 * scale))}px sans-serif`;
             ctx.textAlign = 'center';
-            ctx.fillText('🎯', x, y - r * 0.6);
+            ctx.fillText('🎯', x, y - ry - (22 * scale));
         }
 
         ctx.restore();
@@ -942,10 +1146,9 @@
         ctx.save();
         const pStart = worldToScreen25D(0.0, 0.2, 0.0, w, h);
 
-        // Approximate preview arc
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.6)';
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = selectedColor || 'rgba(245, 158, 11, 0.85)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 6]);
 
         ctx.beginPath();
         ctx.moveTo(pStart.x, pStart.y);
@@ -993,7 +1196,7 @@
         const lineRight = worldToScreenOverhead(0.5, 3.75, w, h);
 
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
         ctx.beginPath();
         ctx.moveTo(lineLeft.x, lineLeft.y);
         ctx.lineTo(lineRight.x, lineRight.y);
@@ -1018,33 +1221,50 @@
         if (currentRoom && currentRoom.current_round_coins) {
             currentRoom.current_round_coins.forEach(coin => {
                 const cp = worldToScreenOverhead(coin.x, coin.y, w, h);
-                const r = 16;
+                const r = 18;
 
                 // Caliper laser line to center line
                 const lineTargetP = worldToScreenOverhead(coin.x, 3.75, w, h);
 
-                ctx.strokeStyle = coin.is_on_line ? '#10b981' : '#f59e0b';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = coin.is_on_line ? '#10b981' : coin.color;
+                ctx.lineWidth = 2.5;
                 ctx.beginPath();
                 ctx.moveTo(cp.x, cp.y);
                 ctx.lineTo(lineTargetP.x, lineTargetP.y);
                 ctx.stroke();
 
-                // Coin top view
+                // Coin top view: Solid, vibrant player color
                 ctx.fillStyle = coin.color;
                 ctx.beginPath();
                 ctx.arc(cp.x, cp.y, r, 0, Math.PI * 2);
                 ctx.fill();
 
                 ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 2;
+                ctx.lineWidth = 2.5;
                 ctx.stroke();
 
-                // Measurement label
-                ctx.fillStyle = '#fef08a';
-                ctx.font = 'bold 12px monospace';
+                // Player avatar inside
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(coin.display_distance, cp.x, cp.y + (coin.y > 3.75 ? 24 : -18));
+                ctx.textBaseline = 'middle';
+                ctx.fillText(coin.avatar || '🪙', cp.x, cp.y);
+
+                // Measurement label
+                ctx.font = 'bold 12px monospace';
+                const labelY = cp.y + (coin.y > 3.75 ? 26 : -20);
+
+                ctx.fillStyle = 'rgba(15, 10, 6, 0.85)';
+                ctx.strokeStyle = coin.color;
+                ctx.lineWidth = 1.5;
+                const distText = `${coin.player_name}: ${coin.display_distance}`;
+                const textW = ctx.measureText(distText).width + 12;
+                roundRect(ctx, cp.x - textW / 2, labelY - 8, textW, 16, 4);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = coin.color;
+                ctx.fillText(distText, cp.x, labelY);
             });
         }
 
@@ -1053,14 +1273,14 @@
 
     // --- Particle Effects ---
     function spawnClayParticles(wx, wy, color) {
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < 22; i++) {
             clayParticles.push({
                 wx,
                 wy,
                 wz: 0.02,
-                vx: (Math.random() - 0.5) * 0.4,
-                vy: (Math.random() - 0.5) * 0.4,
-                vz: Math.random() * 0.35 + 0.1,
+                vx: (Math.random() - 0.5) * 0.45,
+                vy: (Math.random() - 0.5) * 0.45,
+                vz: Math.random() * 0.45 + 0.15,
                 color,
                 life: 1.0,
                 decay: Math.random() * 0.04 + 0.02
@@ -1078,7 +1298,7 @@
             p.wx += p.vx * 0.05;
             p.wy += p.vy * 0.05;
             p.wz += p.vz * 0.05;
-            p.vz -= 0.03; // gravity
+            p.vz -= 0.035; // gravity
             p.life -= p.decay;
 
             if (p.life <= 0 || p.wz < 0) {
@@ -1090,7 +1310,7 @@
             ctx.fillStyle = p.color;
             ctx.globalAlpha = p.life;
             ctx.beginPath();
-            ctx.arc(pt.x, pt.y, 3 * pt.scale, 0, Math.PI * 2);
+            ctx.arc(pt.x, pt.y, 3.5 * pt.scale, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.globalAlpha = 1.0;
@@ -1145,7 +1365,7 @@
         tCtx.fillRect(0, 0, 800, 1000);
 
         // Gold border
-        tCtx.strokeStyle = '#f59e0b';
+        tCtx.strokeStyle = winner.color || '#f59e0b';
         tCtx.lineWidth = 12;
         tCtx.strokeRect(20, 20, 760, 960);
 
@@ -1168,7 +1388,7 @@
         tCtx.fillText('🏆', 400, 250);
         tCtx.fillText(winner.avatar, 400, 350);
 
-        tCtx.fillStyle = '#ffffff';
+        tCtx.fillStyle = winner.color || '#ffffff';
         tCtx.font = 'bold 44px sans-serif';
         tCtx.fillText(winner.name, 400, 420);
 
@@ -1240,6 +1460,42 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    function darkenColor(hex, factor) {
+        if (!hex || !hex.startsWith('#')) return hex;
+        hex = hex.replace('#', '');
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        const num = parseInt(hex, 16);
+        let r = Math.max(0, Math.floor(((num >> 16) & 255) * (1 - factor)));
+        let g = Math.max(0, Math.floor(((num >> 8) & 255) * (1 - factor)));
+        let b = Math.max(0, Math.floor((num & 255) * (1 - factor)));
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function lightenColor(hex, factor) {
+        if (!hex || !hex.startsWith('#')) return hex;
+        hex = hex.replace('#', '');
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        const num = parseInt(hex, 16);
+        let r = Math.min(255, Math.floor(((num >> 16) & 255) + (255 - ((num >> 16) & 255)) * factor));
+        let g = Math.min(255, Math.floor(((num >> 8) & 255) + (255 - ((num >> 8) & 255)) * factor));
+        let b = Math.min(255, Math.floor((num & 255) + (255 - (num & 255)) * factor));
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
     }
 
     Number.prototype.clamp = function (min, max) {

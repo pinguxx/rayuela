@@ -149,6 +149,8 @@ pub struct GameRoom {
     pub last_verdict: Option<RoundVerdict>,
     pub winner_id: Option<String>,
     pub turn_deadline_unix_ms: Option<u64>,
+    pub last_throw_timestamp_unix_ms: u64,
+    pub min_next_throw_unix_ms: u64,
 }
 
 impl GameRoom {
@@ -169,6 +171,8 @@ impl GameRoom {
             last_verdict: None,
             winner_id: None,
             turn_deadline_unix_ms: None,
+            last_throw_timestamp_unix_ms: 0,
+            min_next_throw_unix_ms: 0,
         }
     }
 
@@ -230,7 +234,7 @@ impl GameRoom {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            self.turn_deadline_unix_ms = Some(now + (self.settings.turn_timer_seconds * 1000));
+            self.turn_deadline_unix_ms = Some(now + 3000 + (self.settings.turn_timer_seconds * 1000));
         } else {
             self.turn_deadline_unix_ms = None;
         }
@@ -247,6 +251,16 @@ impl GameRoom {
         if self.phase != GamePhase::Throwing {
             return Err("No es fase de tiro");
         }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        if now < self.min_next_throw_unix_ms {
+            return Err("Espera a que termine el tiro en curso");
+        }
+
         let active = match self.current_active_player() {
             Some(p) => p,
             None => return Err("No hay turno activo"),
@@ -294,6 +308,8 @@ impl GameRoom {
 
         self.current_round_coins.push(sim_result.coin.clone());
         self.last_throw_result = Some(sim_result.clone());
+        self.last_throw_timestamp_unix_ms = now;
+        self.min_next_throw_unix_ms = now + 3200; // 3.2s flight + landing cooldown before next turn
 
         // Advance turn
         self.turn_index += 1;
