@@ -58,8 +58,10 @@ pub struct GameSettings {
     pub throws_per_player: u8, // 1 or 2
     #[serde(default = "default_turn_timer")]
     pub turn_timer_seconds: u64, // 0 = unlimited, 15, 20, 30
+    #[serde(default = "default_court_theme")]
+    pub court_theme: String, // "cajon_barro", "piso_pared", "patio_hacienda"
     #[serde(default = "default_cantina_theme")]
-    pub cantina_theme: String, // "cantina_clasica", "patio_hacienda", "feria_pueblo"
+    pub cantina_theme: String,
     #[serde(default = "default_knockouts")]
     pub knockouts_allowed: bool,
 }
@@ -67,7 +69,8 @@ pub struct GameSettings {
 fn default_target_points() -> u32 { 15 }
 fn default_throws_per_player() -> u8 { 2 }
 fn default_turn_timer() -> u64 { 20 }
-fn default_cantina_theme() -> String { "cantina_clasica".to_string() }
+fn default_court_theme() -> String { "cajon_barro".to_string() }
+fn default_cantina_theme() -> String { "cajon_barro".to_string() }
 fn default_knockouts() -> bool { true }
 
 impl Default for GameSettings {
@@ -76,6 +79,7 @@ impl Default for GameSettings {
             target_points: default_target_points(),
             throws_per_player: default_throws_per_player(),
             turn_timer_seconds: default_turn_timer(),
+            court_theme: default_court_theme(),
             cantina_theme: default_cantina_theme(),
             knockouts_allowed: default_knockouts(),
         }
@@ -276,6 +280,12 @@ impl GameRoom {
 
         let coin_id = format!("coin_{}_{}_{}", self.round_number, player_id, this_throw_num);
 
+        let court_theme = if !self.settings.court_theme.is_empty() {
+            &self.settings.court_theme
+        } else {
+            &self.settings.cantina_theme
+        };
+
         let sim_result = simulate_throw(
             &coin_id,
             &current_player.id,
@@ -283,6 +293,7 @@ impl GameRoom {
             &current_player.color,
             &current_player.avatar,
             &current_player.coin_skin,
+            court_theme,
             this_throw_num,
             angle_deg,
             power,
@@ -484,7 +495,12 @@ impl GameRoom {
         };
 
         let target_y = TARGET_LINE_Y;
-        let (angle, power, elevation, spin) = calculate_bot_throw(target_x, target_y, variance);
+        let court_theme = if !self.settings.court_theme.is_empty() {
+            &self.settings.court_theme
+        } else {
+            &self.settings.cantina_theme
+        };
+        let (angle, power, elevation, spin) = calculate_bot_throw(target_x, target_y, variance, court_theme);
 
         self.execute_player_throw(&active.id, angle, power, elevation, spin).ok()
     }

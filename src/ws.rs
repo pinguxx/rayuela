@@ -482,6 +482,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
                                     broadcast_event(&state, code, &ev).await;
 
+                                    // Pacing delay: let all players see the 3D trajectory, bounces, and carambolas settle
+                                    tokio::time::sleep(Duration::from_millis(2200)).await;
+
                                     if room_clone.phase == GamePhase::RoundReview {
                                         broadcast_event(
                                             &state,
@@ -654,7 +657,12 @@ pub fn start_background_maintenance(state: AppState) {
                                     let variance = player.bot_profile_id.as_ref().and_then(|id| {
                                         BOT_PROFILES.iter().find(|(name, _, _, _)| name == id).map(|(_, _, v, _)| *v)
                                     }).unwrap_or(0.03);
-                                    crate::physics::calculate_bot_throw(0.0, TARGET_LINE_Y, variance)
+                                    let c_theme = if !room.settings.court_theme.is_empty() {
+                                        &room.settings.court_theme
+                                    } else {
+                                        &room.settings.cantina_theme
+                                    };
+                                    crate::physics::calculate_bot_throw(0.0, TARGET_LINE_Y, variance, c_theme)
                                 } else {
                                     // AFK Auto-toss: safe throw towards the center line
                                     (0.0, 0.53, 32.0, 0.0)

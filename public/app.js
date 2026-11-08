@@ -16,6 +16,7 @@
     let selectedAvatar = "🤠";
     let selectedColor = "#f59e0b";
     let selectedCoinSkin = "centenario";
+    let selectedCourtTheme = "cajon_barro";
 
     // Throw input state
     let isDragging = false;
@@ -80,6 +81,9 @@
 
         const savedSkin = localStorage.getItem('rayuela_skin');
         if (savedSkin) selectedCoinSkin = savedSkin;
+
+        const savedCourt = localStorage.getItem('rayuela_court');
+        if (savedCourt) selectedCourtTheme = savedCourt;
 
         renderLobbyCustomizers();
         startRenderLoop();
@@ -157,6 +161,7 @@
                         target_points: parseInt(document.getElementById('select-target-points').value) || 15,
                         throws_per_player: parseInt(document.getElementById('select-throws-per-round').value) || 2,
                         turn_timer_seconds: parseInt(document.getElementById('select-turn-timer').value) || 20,
+                        court_theme: selectedCourtTheme || 'cajon_barro',
                         cantina_theme: 'cantina_clasica',
                         knockouts_allowed: true
                     }
@@ -269,6 +274,16 @@
                 card.classList.add('selected');
             });
         });
+
+        // Courts
+        document.querySelectorAll('.court-card').forEach(card => {
+            if (card.dataset.court === selectedCourtTheme) card.classList.add('selected');
+            card.addEventListener('click', () => {
+                selectedCourtTheme = card.dataset.court;
+                document.querySelectorAll('.court-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+            });
+        });
     }
 
     function savePreferences() {
@@ -276,6 +291,7 @@
         localStorage.setItem('rayuela_avatar', selectedAvatar);
         localStorage.setItem('rayuela_color', selectedColor);
         localStorage.setItem('rayuela_skin', selectedCoinSkin);
+        localStorage.setItem('rayuela_court', selectedCourtTheme);
     }
 
     function checkUrlForRoomCode() {
@@ -355,11 +371,11 @@
 
             case 'round_finished':
                 currentRoom = ev.room;
-                // Wait slightly if coin is currently flying before opening review
+                // Wait for coin flight, bounces, and carambolas to finish before opening Foto-Finish
                 setTimeout(() => {
                     updateRoomStateUI(ev.room);
                     showFotoFinishModal(ev.room);
-                }, activeFlightAnimation ? 1200 : 300);
+                }, activeFlightAnimation ? 2600 : 400);
                 break;
 
             case 'match_finished':
@@ -367,7 +383,7 @@
                 setTimeout(() => {
                     updateRoomStateUI(ev.room);
                     showVictoryModal(ev.room);
-                }, activeFlightAnimation ? 1400 : 400);
+                }, activeFlightAnimation ? 2800 : 500);
                 break;
 
             case 'banter':
@@ -408,6 +424,16 @@
         document.getElementById('waiting-room-code-display').textContent = room.room_code;
         document.getElementById('waiting-target-display').textContent = `${room.settings.target_points} pts`;
         document.getElementById('waiting-timer-display').textContent = room.settings.turn_timer_seconds > 0 ? `${room.settings.turn_timer_seconds}s` : 'Sin límite';
+
+        const courtNames = {
+            'cajon_barro': '🏺 Cajón de Barro tradicional',
+            'piso_pared': '🏛️ Piso & Pared (Rebote y Carambola)',
+            'patio_hacienda': '🎪 Patio de Hacienda (Empedrado festivo)'
+        };
+        const elCourtDisplay = document.getElementById('waiting-court-display');
+        if (elCourtDisplay) {
+            elCourtDisplay.textContent = courtNames[room.settings.court_theme] || '🏺 Cajón de Barro';
+        }
 
         elWaitingPlayersList.innerHTML = '';
         room.players.forEach(p => {
@@ -527,29 +553,60 @@
     }
 
     // --- Throw Handling & Fluid Animation ---
+    function spawnSparks(wx, wy) {
+        const sparkColors = ['#fef08a', '#f59e0b', '#ffffff', '#fbbf24', '#cbd5e1'];
+        for (let i = 0; i < 18; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const spd = Math.random() * 0.85 + 0.35;
+            clayParticles.push({
+                wx,
+                wy,
+                wz: 0.04,
+                vx: Math.cos(angle) * spd,
+                vy: Math.sin(angle) * spd,
+                vz: Math.random() * 0.70 + 0.25,
+                color: sparkColors[Math.floor(Math.random() * sparkColors.length)],
+                life: 1.0,
+                decay: Math.random() * 0.05 + 0.035
+            });
+        }
+    }
+
     function handleThrowAnimation(ev) {
         const { sim, dicho_es } = ev;
 
         audio.playCoinFlight();
 
-        // Calculate smooth flight duration
-        const flightDurationMs = Math.max(950, Math.min(1450, sim.flight_duration_s * 1000));
-        const skidDurationMs = 380;
+        // Build knockouts map for responsive victim coin recoil
+        const knockoutsMap = {};
+        if (sim.knockouts && sim.knockouts.length > 0) {
+            sim.knockouts.forEach(k => {
+                knockoutsMap[k.victim_coin_id] = k;
+            });
+        }
+
+        // Calibrate animation duration so flight, bounce, and carambola slides are crystal clear
+        const animDurationMs = Math.max(1600, Math.min(2500, sim.flight_duration_s * 1000 * 1.35));
 
         activeFlightAnimation = {
             sim,
             trajectory: sim.trajectory,
             coin: sim.coin,
-            flightDurationMs,
-            skidDurationMs,
-            totalDurationMs: flightDurationMs + skidDurationMs,
+            knockoutsMap,
+            animDurationMs,
             startTime: performance.now(),
-            impactHandled: false,
-            skidStartX: sim.trajectory[sim.trajectory.length - 1].x,
-            skidStartY: sim.trajectory[sim.trajectory.length - 1].y,
+            triggeredBounces: new Set(),
+            triggeredKnockouts: new Set(),
             onComplete: () => {
                 activeFlightAnimation = null;
                 isWaitingForNextTurn = true;
+
+                // Play conclusion cue if not already triggered
+                if (sim.sound_cue === 'rayada') {
+                    audio.playRayada();
+                } else if (sim.sound_cue === 'clavada') {
+                    audio.playClavada();
+                }
 
                 // Speak and show cantina banter
                 audio.speakDicho(dicho_es);
@@ -802,27 +859,286 @@
         ctx.save();
         ctx.globalAlpha = alpha;
 
-        // 1. Cantina Wood Floor planks
-        const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
-        floorGrad.addColorStop(0, '#120904');
-        floorGrad.addColorStop(0.5, '#221107');
-        floorGrad.addColorStop(1, '#170b04');
-        ctx.fillStyle = floorGrad;
-        ctx.fillRect(0, 0, w, h);
+        const courtTheme = (currentRoom && currentRoom.settings && currentRoom.settings.court_theme) || selectedCourtTheme || 'cajon_barro';
 
-        // Perspective plank lines
-        ctx.strokeStyle = 'rgba(74, 30, 7, 0.4)';
-        ctx.lineWidth = 1.5;
-        for (let x = -1.2; x <= 1.2; x += 0.4) {
-            const p1 = worldToScreen25D(x, 0.0, 0.0, w, h);
-            const p2 = worldToScreen25D(x, 4.8, 0.0, w, h);
+        // 1. Render Court Background & Surface by Theme
+        if (courtTheme === 'piso_pared') {
+            // --- COURT 2: PISO & PARED (Cantina Tile & Wood Rebound Wall) ---
+            const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
+            floorGrad.addColorStop(0, '#1c0a03');
+            floorGrad.addColorStop(0.4, '#2e1206');
+            floorGrad.addColorStop(1, '#180702');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Talavera Tile Grid in perspective
+            ctx.strokeStyle = 'rgba(254, 240, 138, 0.16)';
+            ctx.lineWidth = 1.2;
+            for (let x = -1.2; x <= 1.2; x += 0.3) {
+                const p1 = worldToScreen25D(x, 0.0, 0.0, w, h);
+                const p2 = worldToScreen25D(x, 4.5, 0.0, w, h);
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+            for (let y = 0.5; y <= 4.5; y += 0.5) {
+                const p1 = worldToScreen25D(-1.2, y, 0.0, w, h);
+                const p2 = worldToScreen25D(1.2, y, 0.0, w, h);
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+
+            // Solid Mahogany Back-Wall at Y = 4.5m (Carambola Wall!)
+            const wBL = worldToScreen25D(-1.25, 4.5, 0.0, w, h);
+            const wBR = worldToScreen25D(1.25, 4.5, 0.0, w, h);
+            const wTL = worldToScreen25D(-1.25, 4.5, 0.75, w, h);
+            const wTR = worldToScreen25D(1.25, 4.5, 0.75, w, h);
+
+            // Wall face
+            const wallGrad = ctx.createLinearGradient(0, wTL.y, 0, wBL.y);
+            wallGrad.addColorStop(0, '#451a03');
+            wallGrad.addColorStop(0.5, '#78350f');
+            wallGrad.addColorStop(1, '#291205');
+            ctx.fillStyle = wallGrad;
             ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
+            ctx.moveTo(wTL.x, wTL.y);
+            ctx.lineTo(wTR.x, wTR.y);
+            ctx.lineTo(wBR.x, wBR.y);
+            ctx.lineTo(wBL.x, wBL.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Brass rail trim along wall bottom and top
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            ctx.moveTo(wTL.x, wTL.y);
+            ctx.lineTo(wTR.x, wTR.y);
+            ctx.moveTo(wBL.x, wBL.y);
+            ctx.lineTo(wBR.x, wBR.y);
             ctx.stroke();
+
+            // Carambola Wall sign
+            ctx.fillStyle = '#fef08a';
+            ctx.font = 'bold 11px Cinzel, serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('✦ PARED DE CARAMBOLA — REBOTE PERMITIDO ✦', w / 2, (wTL.y + wBL.y) / 2);
+
+            // Inlaid Brass Target Line at Y = 3.75m
+            const r1 = worldToScreen25D(-0.9, 3.75, 0.0, w, h);
+            const r2 = worldToScreen25D(0.9, 3.75, 0.0, w, h);
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(r1.x, r1.y);
+            ctx.lineTo(r2.x, r2.y);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.55)';
+            ctx.lineWidth = 9;
+            ctx.stroke();
+
+        } else if (courtTheme === 'patio_hacienda') {
+            // --- COURT 3: PATIO DE HACIENDA (Cobblestones & Papel Picado) ---
+            const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
+            floorGrad.addColorStop(0, '#1c1007');
+            floorGrad.addColorStop(0.5, '#2e190c');
+            floorGrad.addColorStop(1, '#1b0e06');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Cobblestone perspective pavers
+            ctx.strokeStyle = 'rgba(120, 53, 15, 0.35)';
+            ctx.lineWidth = 1.5;
+            for (let x = -1.2; x <= 1.2; x += 0.35) {
+                const p1 = worldToScreen25D(x, 0.0, 0.0, w, h);
+                const p2 = worldToScreen25D(x, 4.8, 0.0, w, h);
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+
+            // Terracotta court borders
+            const c1 = worldToScreen25D(-0.55, 2.95, 0.04, w, h);
+            const c2 = worldToScreen25D(0.55, 2.95, 0.04, w, h);
+            const c3 = worldToScreen25D(0.55, 4.55, 0.04, w, h);
+            const c4 = worldToScreen25D(-0.55, 4.55, 0.04, w, h);
+            ctx.fillStyle = '#431407';
+            ctx.beginPath();
+            ctx.moveTo(c1.x, c1.y);
+            ctx.lineTo(c2.x, c2.y);
+            ctx.lineTo(c3.x, c3.y);
+            ctx.lineTo(c4.x, c4.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Cobblestone Bed
+            const b1 = worldToScreen25D(-0.50, 3.0, 0.0, w, h);
+            const b2 = worldToScreen25D(0.50, 3.0, 0.0, w, h);
+            const b3 = worldToScreen25D(0.50, 4.5, 0.0, w, h);
+            const b4 = worldToScreen25D(-0.50, 4.5, 0.0, w, h);
+            const cobbleGrad = ctx.createLinearGradient(0, b3.y, 0, b1.y);
+            cobbleGrad.addColorStop(0, '#59250a');
+            cobbleGrad.addColorStop(0.5, '#7c2d12');
+            cobbleGrad.addColorStop(1, '#501e07');
+            ctx.fillStyle = cobbleGrad;
+            ctx.beginPath();
+            ctx.moveTo(b1.x, b1.y);
+            ctx.lineTo(b2.x, b2.y);
+            ctx.lineTo(b3.x, b3.y);
+            ctx.lineTo(b4.x, b4.y);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = '#b45309';
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+
+            // Center Line: Chiseled stone with white lime
+            const r1 = worldToScreen25D(-0.50, 3.75, 0.0, w, h);
+            const r2 = worldToScreen25D(0.50, 3.75, 0.0, w, h);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            ctx.moveTo(r1.x, r1.y);
+            ctx.lineTo(r2.x, r2.y);
+            ctx.stroke();
+
+            // Festive Mexican Papel Picado Bunting across the top
+            const flags = ['#ec4899', '#06b6d4', '#eab308', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#06b6d4'];
+            const flagCount = flags.length;
+            const flagW = w / (flagCount + 1);
+            const now = Date.now();
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(254, 240, 138, 0.6)';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(0, h * 0.08);
+            ctx.quadraticCurveTo(w / 2, h * 0.16, w, h * 0.08);
+            ctx.stroke();
+
+            for (let i = 0; i < flagCount; i++) {
+                const fx = (i + 0.6) * flagW;
+                const sag = Math.sin((i / flagCount) * Math.PI) * (h * 0.07);
+                const fy = h * 0.08 + sag;
+                const sway = Math.sin(now * 0.0025 + i * 0.8) * 0.08;
+
+                ctx.save();
+                ctx.translate(fx, fy);
+                ctx.rotate(sway);
+                ctx.fillStyle = flags[i];
+                ctx.beginPath();
+                ctx.moveTo(-16, 0);
+                ctx.lineTo(16, 0);
+                ctx.lineTo(16, 26);
+                ctx.lineTo(0, 34);
+                ctx.lineTo(-16, 26);
+                ctx.closePath();
+                ctx.fill();
+
+                // Small incandescent light bulb above each flag
+                ctx.fillStyle = '#fef08a';
+                ctx.beginPath();
+                ctx.arc(0, -3, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.restore();
+
+        } else {
+            // --- COURT 1: CAJÓN DE BARRO (Traditional Wet Clay Pit) ---
+            const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
+            floorGrad.addColorStop(0, '#120904');
+            floorGrad.addColorStop(0.5, '#221107');
+            floorGrad.addColorStop(1, '#170b04');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Wood plank perspective lines
+            ctx.strokeStyle = 'rgba(74, 30, 7, 0.4)';
+            ctx.lineWidth = 1.5;
+            for (let x = -1.2; x <= 1.2; x += 0.4) {
+                const p1 = worldToScreen25D(x, 0.0, 0.0, w, h);
+                const p2 = worldToScreen25D(x, 4.8, 0.0, w, h);
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+
+            // Outer box corners: X in [-0.52, 0.52], Y in [2.98, 4.52]
+            const c1 = worldToScreen25D(-0.52, 2.98, 0.08, w, h);
+            const c2 = worldToScreen25D(0.52, 2.98, 0.08, w, h);
+            const c3 = worldToScreen25D(0.52, 4.52, 0.08, w, h);
+            const c4 = worldToScreen25D(-0.52, 4.52, 0.08, w, h);
+
+            ctx.fillStyle = '#291205';
+            ctx.beginPath();
+            ctx.moveTo(c1.x, c1.y);
+            ctx.lineTo(c2.x, c2.y);
+            ctx.lineTo(c3.x, c3.y);
+            ctx.lineTo(c4.x, c4.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Damp clay inner bed: X in [-0.48, 0.48], Y in [3.02, 4.48]
+            const b1 = worldToScreen25D(-0.48, 3.02, 0.0, w, h);
+            const b2 = worldToScreen25D(0.48, 3.02, 0.0, w, h);
+            const b3 = worldToScreen25D(0.48, 4.48, 0.0, w, h);
+            const b4 = worldToScreen25D(-0.48, 4.48, 0.0, w, h);
+
+            const clayGrad = ctx.createLinearGradient(0, b3.y, 0, b1.y);
+            clayGrad.addColorStop(0, '#3f1f06');
+            clayGrad.addColorStop(0.5, '#5c3008');
+            clayGrad.addColorStop(1, '#4a2507');
+            ctx.fillStyle = clayGrad;
+            ctx.beginPath();
+            ctx.moveTo(b1.x, b1.y);
+            ctx.lineTo(b2.x, b2.y);
+            ctx.lineTo(b3.x, b3.y);
+            ctx.lineTo(b4.x, b4.y);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = '#78350f';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Center line (La Raya) at Y = 3.75
+            const r1 = worldToScreen25D(-0.48, 3.75, 0.0, w, h);
+            const r2 = worldToScreen25D(0.48, 3.75, 0.0, w, h);
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            ctx.moveTo(r1.x, r1.y);
+            ctx.lineTo(r2.x, r2.y);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+            ctx.lineWidth = 8;
+            ctx.stroke();
+
+            // Render Clay Skid Marks
+            claySkidMarks.forEach(sm => {
+                const sp1 = worldToScreen25D(sm.x1, sm.y1, 0.0, w, h);
+                const sp2 = worldToScreen25D(sm.x2, sm.y2, 0.0, w, h);
+                ctx.strokeStyle = 'rgba(35, 16, 4, 0.7)';
+                ctx.lineWidth = 7 * sp1.scale;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(sp1.x, sp1.y);
+                ctx.lineTo(sp2.x, sp2.y);
+                ctx.stroke();
+            });
         }
 
-        // Throw line (Línea de tiro) at Y = 0
+        // Throw line (Línea de tiro) at Y = 0.2
         const tl1 = worldToScreen25D(-0.8, 0.2, 0.0, w, h);
         const tl2 = worldToScreen25D(0.8, 0.2, 0.0, w, h);
         ctx.strokeStyle = '#f59e0b';
@@ -837,175 +1153,146 @@
         ctx.textAlign = 'center';
         ctx.fillText('LÍNEA DE TIRO (RAYA INICIAL)', w / 2, tl1.y + 18);
 
-        // 2. El Cajón de Barro (Damp Clay Box)
-        // Outer box corners: X in [-0.52, 0.52], Y in [2.98, 4.52]
-        const c1 = worldToScreen25D(-0.52, 2.98, 0.08, w, h);
-        const c2 = worldToScreen25D(0.52, 2.98, 0.08, w, h);
-        const c3 = worldToScreen25D(0.52, 4.52, 0.08, w, h);
-        const c4 = worldToScreen25D(-0.52, 4.52, 0.08, w, h);
-
-        // Wood rim outer shadow
-        ctx.fillStyle = '#291205';
-        ctx.beginPath();
-        ctx.moveTo(c1.x, c1.y);
-        ctx.lineTo(c2.x, c2.y);
-        ctx.lineTo(c3.x, c3.y);
-        ctx.lineTo(c4.x, c4.y);
-        ctx.closePath();
-        ctx.fill();
-
-        // Damp clay inner bed: X in [-0.48, 0.48], Y in [3.02, 4.48]
-        const b1 = worldToScreen25D(-0.48, 3.02, 0.0, w, h);
-        const b2 = worldToScreen25D(0.48, 3.02, 0.0, w, h);
-        const b3 = worldToScreen25D(0.48, 4.48, 0.0, w, h);
-        const b4 = worldToScreen25D(-0.48, 4.48, 0.0, w, h);
-
-        const clayGrad = ctx.createLinearGradient(0, b3.y, 0, b1.y);
-        clayGrad.addColorStop(0, '#3f1f06');
-        clayGrad.addColorStop(0.5, '#5c3008');
-        clayGrad.addColorStop(1, '#4a2507');
-        ctx.fillStyle = clayGrad;
-        ctx.beginPath();
-        ctx.moveTo(b1.x, b1.y);
-        ctx.lineTo(b2.x, b2.y);
-        ctx.lineTo(b3.x, b3.y);
-        ctx.lineTo(b4.x, b4.y);
-        ctx.closePath();
-        ctx.fill();
-
-        // Wood rail frame stroke
-        ctx.strokeStyle = '#78350f';
-        ctx.lineWidth = 4;
-        ctx.stroke();
-
-        // Center line (La Raya) at Y = 3.75
-        const r1 = worldToScreen25D(-0.48, 3.75, 0.0, w, h);
-        const r2 = worldToScreen25D(0.48, 3.75, 0.0, w, h);
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        ctx.moveTo(r1.x, r1.y);
-        ctx.lineTo(r2.x, r2.y);
-        ctx.stroke();
-
-        // Subtle glow on the line
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
-        ctx.lineWidth = 8;
-        ctx.stroke();
-
-        // 3. Render Clay Skid Marks
-        claySkidMarks.forEach(sm => {
-            const sp1 = worldToScreen25D(sm.x1, sm.y1, 0.0, w, h);
-            const sp2 = worldToScreen25D(sm.x2, sm.y2, 0.0, w, h);
-            ctx.strokeStyle = 'rgba(35, 16, 4, 0.7)';
-            ctx.lineWidth = 7 * sp1.scale;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(sp1.x, sp1.y);
-            ctx.lineTo(sp2.x, sp2.y);
-            ctx.stroke();
-        });
-
-        // 4. Render Settled Coins in the Clay
+        // 2. Render Settled Coins on the Court
         if (currentRoom && currentRoom.current_round_coins) {
             currentRoom.current_round_coins.forEach(coin => {
+                // If this is the coin currently flying in activeFlightAnimation, DO NOT DRAW IT HERE!
+                if (activeFlightAnimation && activeFlightAnimation.coin && coin.id === activeFlightAnimation.coin.id) {
+                    return;
+                }
+
+                // If this coin was struck in a collision during activeFlightAnimation:
+                if (activeFlightAnimation && activeFlightAnimation.knockoutsMap && activeFlightAnimation.knockoutsMap[coin.id]) {
+                    const k = activeFlightAnimation.knockoutsMap[coin.id];
+                    const elapsed = performance.now() - activeFlightAnimation.startTime;
+                    const animProg = Math.min(1.0, elapsed / activeFlightAnimation.animDurationMs);
+                    const totalSimTime = activeFlightAnimation.sim.flight_duration_s || 1.0;
+                    const collTimeFrac = (k.collision_time_s / totalSimTime).clamp(0.05, 0.95);
+
+                    if (animProg < collTimeFrac) {
+                        // BEFORE COLLISION: Coin stays stationary at its pre-collision position!
+                        const p = worldToScreen25D(k.old_x, k.old_y, coin.z, w, h);
+                        drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin, false, 1.0, 0);
+                        return;
+                    } else {
+                        // AFTER COLLISION: Coin slides with smooth cubic deceleration to new_x, new_y!
+                        const slideProg = Math.min(1.0, (animProg - collTimeFrac) / Math.max(0.05, (1.0 - collTimeFrac)));
+                        const easeOutSlide = 1.0 - Math.pow(1.0 - slideProg, 3);
+                        const curVictimX = k.old_x + (k.new_x - k.old_x) * easeOutSlide;
+                        const curVictimY = k.old_y + (k.new_y - k.old_y) * easeOutSlide;
+                        const p = worldToScreen25D(curVictimX, curVictimY, coin.z, w, h);
+                        drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin, false, 1.0, 0);
+                        return;
+                    }
+                }
+
+                // Normal settled coin
                 const p = worldToScreen25D(coin.x, coin.y, coin.z, w, h);
                 drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin, false, 1.0, 0);
             });
         }
 
-        // 5. Render Active In-Flight / Skidding Coin (Continuous Hermite Interpolation)
+        // 3. Render Active In-Flight / Bouncing / Knockout Coin
         if (activeFlightAnimation) {
             const anim = activeFlightAnimation;
             const elapsed = performance.now() - anim.startTime;
-            const flightDur = anim.flightDurationMs;
+            const animProg = Math.min(1.0, elapsed / anim.animDurationMs);
+            const simTime = animProg * (anim.sim.flight_duration_s || 1.0);
+            const traj = anim.trajectory;
 
-            let curX, curY, curZ, tiltY, spinAngle;
+            let curX = traj[0].x;
+            let curY = traj[0].y;
+            let curZ = traj[0].z;
 
-            if (elapsed < flightDur) {
-                // IN AIR FLIGHT PHASE
-                const frac = elapsed / flightDur;
-
-                // Hermite cubic smooth interpolation between trajectory points
-                const traj = anim.trajectory;
-                const totalSegs = traj.length - 1;
-                const rawIdx = frac * totalSegs;
-                const i0 = Math.floor(rawIdx);
-                const i1 = Math.min(totalSegs, i0 + 1);
-                const segFrac = rawIdx - i0;
-                const smoothT = segFrac * segFrac * (3 - 2 * segFrac); // Smoothstep
-
-                const p0 = traj[i0];
-                const p1 = traj[i1];
+            if (traj.length > 1) {
+                let idx = 0;
+                while (idx < traj.length - 1 && traj[idx + 1].t < simTime) {
+                    idx++;
+                }
+                const p0 = traj[idx];
+                const p1 = traj[Math.min(traj.length - 1, idx + 1)];
+                const dt = p1.t - p0.t;
+                const segFrac = dt > 0.0001 ? ((simTime - p0.t) / dt).clamp(0.0, 1.0) : 0.0;
+                const smoothT = segFrac * segFrac * (3 - 2 * segFrac);
 
                 curX = p0.x + (p1.x - p0.x) * smoothT;
                 curY = p0.y + (p1.y - p0.y) * smoothT;
                 curZ = p0.z + (p1.z - p0.z) * smoothT;
+            }
 
-                // 3D tumbling & spinning
-                const flips = 4.0;
-                tiltY = Math.abs(Math.cos(frac * Math.PI * 2 * flips)) * 0.72 + 0.28;
-                spinAngle = frac * Math.PI * 4;
+            // Check and trigger bounce events
+            for (let i = 0; i < traj.length; i++) {
+                if (traj[i].is_bounce && simTime >= traj[i].t && !anim.triggeredBounces.has(i)) {
+                    anim.triggeredBounces.add(i);
 
-                // Shadow projected on ground
-                const shadowP = worldToScreen25D(curX, curY, 0.0, w, h);
-                const shadowAlpha = (0.55 * (1.0 - (curZ / 1.5).clamp(0, 0.7))).clamp(0.15, 0.6);
-                ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
-                ctx.beginPath();
-                ctx.ellipse(shadowP.x, shadowP.y, 16 * shadowP.scale, 8 * shadowP.scale, 0, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Coin in air
-                const airP = worldToScreen25D(curX, curY, curZ, w, h);
-                drawPerspectiveCoin(ctx, airP.x, airP.y, airP.scale * 1.15, anim.coin, true, tiltY, spinAngle);
-
-            } else {
-                // IMPACT & SKID PHASE
-                const skidElapsed = elapsed - flightDur;
-                const skidProgress = Math.min(1.0, skidElapsed / anim.skidDurationMs);
-
-                if (!anim.impactHandled) {
-                    anim.impactHandled = true;
-
-                    // Trigger sounds
-                    if (anim.sim.sound_cue === 'rayada') {
-                        audio.playRayada();
-                    } else if (anim.sim.sound_cue === 'clavada') {
-                        audio.playClavada();
-                    } else if (anim.sim.sound_cue === 'knockout') {
-                        audio.playCoinKnockout();
-                    } else if (anim.sim.sound_cue === 'miss') {
-                        audio.playMiss();
+                    const isWallBounce = courtTheme === 'piso_pared' && traj[i].y >= 4.42;
+                    if (isWallBounce) {
+                        audio.playWallBounce();
+                        triggerCameraShake(7);
+                        spawnSparks(traj[i].x, traj[i].y);
+                    } else if (courtTheme === 'piso_pared') {
+                        audio.playBounceTile();
+                        triggerCameraShake(3);
+                        spawnSparks(traj[i].x, traj[i].y);
+                    } else if (courtTheme === 'patio_hacienda') {
+                        audio.playCobbleBounce();
+                        triggerCameraShake(4);
+                        spawnClayParticles(traj[i].x, traj[i].y, '#f59e0b');
                     } else {
                         audio.playClayThud();
+                        triggerCameraShake(4);
+                        spawnClayParticles(traj[i].x, traj[i].y, '#5c3008');
+                        if (i > 0) {
+                            addClaySkidMark(traj[i - 1].x, traj[i - 1].y, traj[i].x, traj[i].y);
+                        }
                     }
-
-                    // Spawn clay particles
-                    spawnClayParticles(anim.coin.x, anim.coin.y, anim.coin.color);
-
-                    // Add skid mark to wet clay
-                    addClaySkidMark(anim.skidStartX, anim.skidStartY, anim.coin.x, anim.coin.y);
-
-                    // Camera micro-shake
-                    triggerCameraShake(5);
-                }
-
-                // Cubic deceleration skid
-                const skidT = 1.0 - Math.pow(1.0 - skidProgress, 3);
-                curX = anim.skidStartX + (anim.coin.x - anim.skidStartX) * skidT;
-                curY = anim.skidStartY + (anim.coin.y - anim.skidStartY) * skidT;
-                curZ = anim.coin.z;
-                tiltY = anim.coin.status === 'clavada' ? 0.35 : 1.0;
-
-                const settledP = worldToScreen25D(curX, curY, curZ, w, h);
-                drawPerspectiveCoin(ctx, settledP.x, settledP.y, settledP.scale, anim.coin, false, tiltY, 0);
-
-                if (skidProgress >= 1.0) {
-                    anim.onComplete();
                 }
             }
+
+            // Check and trigger knockout collisions
+            if (anim.sim.knockouts) {
+                anim.sim.knockouts.forEach((k, kIdx) => {
+                    if (simTime >= k.collision_time_s && !anim.triggeredKnockouts.has(kIdx)) {
+                        anim.triggeredKnockouts.add(kIdx);
+                        audio.playCoinKnockout();
+                        triggerCameraShake(8);
+                        spawnSparks(k.collision_x, k.collision_y);
+                        showToast(`💥 ¡Carambola! ${anim.coin.player_name} golpeó la moneda de ${k.victim_player_name}`);
+                    }
+                });
+            }
+
+            // In-air tumbling vs ground orientation
+            const inAir = curZ > 0.02;
+            const flips = inAir ? 4.5 : 0;
+            const tiltY = inAir
+                ? (Math.abs(Math.cos(animProg * Math.PI * 2 * flips)) * 0.72 + 0.28)
+                : (anim.sim.was_clavada ? 0.35 : 1.0);
+
+            // Ground shadow
+            const shadowP = worldToScreen25D(curX, curY, 0.0, w, h);
+            const shadowAlpha = (0.55 * (1.0 - (curZ / 1.6).clamp(0, 0.75))).clamp(0.12, 0.58);
+            ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+            ctx.beginPath();
+            ctx.ellipse(shadowP.x, shadowP.y, 18 * shadowP.scale, 9 * shadowP.scale, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Render the coin in flight
+            const airP = worldToScreen25D(curX, curY, curZ, w, h);
+            drawPerspectiveCoin(ctx, airP.x, airP.y, airP.scale * (inAir ? 1.15 : 1.0), anim.coin, inAir, tiltY, 0);
+
+            if (animProg >= 1.0) {
+                anim.onComplete();
+            }
         }
+
+        // 4. Aiming Sling / Trajectory Preview
+        if (isDragging && isMyTurn()) {
+            drawAimingTrajectory(ctx, w, h);
+        }
+
+        ctx.restore();
+    }
 
         // 6. Aiming Sling / Trajectory Preview
         if (isDragging && isMyTurn()) {
@@ -1182,20 +1469,39 @@
         const boxW = bottomRight.x - topLeft.x;
         const boxH = bottomRight.y - topLeft.y;
 
-        // Clay bed
-        ctx.fillStyle = '#5c3008';
-        ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
+        const courtTheme = (currentRoom && currentRoom.settings && currentRoom.settings.court_theme) || 'cajon_barro';
 
-        // Wooden frame
-        ctx.strokeStyle = '#78350f';
-        ctx.lineWidth = 8;
-        ctx.strokeRect(topLeft.x, topLeft.y, boxW, boxH);
+        // Court Bed by Theme
+        if (courtTheme === 'piso_pared') {
+            ctx.fillStyle = '#2e1206';
+            ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(topLeft.x, topLeft.y, boxW, boxH);
+            // Back wall at top
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(topLeft.x, topLeft.y, boxW, 14);
+        } else if (courtTheme === 'patio_hacienda') {
+            ctx.fillStyle = '#7c2d12';
+            ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
+            ctx.strokeStyle = '#b45309';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(topLeft.x, topLeft.y, boxW, boxH);
+        } else {
+            // Clay bed
+            ctx.fillStyle = '#5c3008';
+            ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
+            // Wooden frame
+            ctx.strokeStyle = '#78350f';
+            ctx.lineWidth = 8;
+            ctx.strokeRect(topLeft.x, topLeft.y, boxW, boxH);
+        }
 
         // Center line (La Raya)
         const lineLeft = worldToScreenOverhead(-0.5, 3.75, w, h);
         const lineRight = worldToScreenOverhead(0.5, 3.75, w, h);
 
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = courtTheme === 'piso_pared' ? '#fef08a' : '#ffffff';
         ctx.lineWidth = 3.5;
         ctx.beginPath();
         ctx.moveTo(lineLeft.x, lineLeft.y);

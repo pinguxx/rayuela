@@ -211,6 +211,81 @@ class CantinaAudio {
         });
     }
 
+    // 5b. Crisp Tile Impact (Piso de Cantina)
+    playBounceTile() {
+        if (this.muted || !this.ctx) return;
+        this.resume();
+        const now = this.ctx.currentTime;
+
+        // Bright ceramic click
+        const freqs = [1480, 2220, 3100];
+        freqs.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + idx * 0.01);
+            gain.gain.setValueAtTime(0.28, now + idx * 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.01 + 0.18);
+
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+            osc.start(now + idx * 0.01);
+            osc.stop(now + idx * 0.01 + 0.18);
+        });
+    }
+
+    // 5c. Heavy Back-Wall Rebound (Carambola en pared de madera)
+    playWallBounce() {
+        if (this.muted || !this.ctx) return;
+        this.resume();
+        const now = this.ctx.currentTime;
+
+        // Deep wood thump
+        const osc = this.ctx.createOscillator();
+        const oscGain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.22);
+        oscGain.gain.setValueAtTime(0.75, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.connect(oscGain);
+        oscGain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.25);
+
+        // Metallic edge vibration rattle
+        const metal = this.ctx.createOscillator();
+        const metalGain = this.ctx.createGain();
+        metal.type = 'sawtooth';
+        metal.frequency.setValueAtTime(840, now);
+        metal.frequency.linearRampToValueAtTime(420, now + 0.15);
+        metalGain.gain.setValueAtTime(0.22, now);
+        metalGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        metal.connect(metalGain);
+        metalGain.connect(this.masterGain);
+        metal.start(now);
+        metal.stop(now + 0.2);
+    }
+
+    // 5d. Cobblestone / Colonial Patio Impact
+    playCobbleBounce() {
+        if (this.muted || !this.ctx) return;
+        this.resume();
+        const now = this.ctx.currentTime;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(480, now);
+        osc.frequency.exponentialRampToValueAtTime(180, now + 0.14);
+        gain.gain.setValueAtTime(0.40, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.15);
+    }
+
     // 6. Miss / Out of Box Scratch
     playMiss() {
         if (this.muted || !this.ctx) return;

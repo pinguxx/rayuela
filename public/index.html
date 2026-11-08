@@ -101,6 +101,34 @@
           </div>
         </div>
 
+        <!-- Court / Cancha Selector -->
+        <div class="form-group">
+          <label>Cancha y Terreno de Juego</label>
+          <div class="court-selector" id="court-selector">
+            <div class="court-card selected" data-court="cajon_barro">
+              <div class="court-icon">🏺</div>
+              <div class="court-info">
+                <h4>Cajón de Barro</h4>
+                <p>Barro húmedo tradicional, poco rebote, clavadas épicas</p>
+              </div>
+            </div>
+            <div class="court-card" data-court="piso_pared">
+              <div class="court-icon">🏛️</div>
+              <div class="court-info">
+                <h4>Piso & Pared</h4>
+                <p>Baldosa de cantina, rebote vivo y carambola en pared</p>
+              </div>
+            </div>
+            <div class="court-card" data-court="patio_hacienda">
+              <div class="court-icon">🎪</div>
+              <div class="court-info">
+                <h4>Patio de Hacienda</h4>
+                <p>Empedrado colonial, papel picado festivo y feria</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Match Options -->
         <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div>
@@ -170,7 +198,7 @@
             <div>🏷️ <strong>Código de Sala:</strong> <span id="waiting-room-code-display" style="color:var(--gold-glow);font-size:16px;font-weight:700;">----</span></div>
             <div>🎯 <strong>Meta de Victoria:</strong> <span id="waiting-target-display">15 pts</span></div>
             <div>⏱️ <strong>Tiempo de Turno:</strong> <span id="waiting-timer-display">20s</span></div>
-            <div>📦 <strong>Cancha:</strong> Cajón de Barro tradicional (3.75m al centro)</div>
+            <div>📦 <strong>Cancha:</strong> <span id="waiting-court-display" style="color:var(--gold-glow);font-weight:700;">Cajón de Barro</span></div>
             
             <div style="background:#100703;padding:10px;border-radius:6px;border-left:3px solid var(--gold-centenario);margin-top:6px;">
               <strong style="color:var(--gold-glow);">Puntajes de Cantina:</strong><br>
