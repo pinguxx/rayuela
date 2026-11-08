@@ -246,11 +246,17 @@
 
         // In-game Exit button & Confirmation Modal
         const btnExit = document.getElementById('btn-exit-game');
+        const btnMobileExit = document.getElementById('btn-mobile-exit');
         const modalExit = document.getElementById('modal-exit-confirm');
         const btnCancelExit = document.getElementById('btn-cancel-exit');
         const btnConfirmExit = document.getElementById('btn-confirm-exit');
         if (btnExit && modalExit) {
             btnExit.addEventListener('click', () => {
+                modalExit.classList.add('active');
+            });
+        }
+        if (btnMobileExit && modalExit) {
+            btnMobileExit.addEventListener('click', () => {
                 modalExit.classList.add('active');
             });
         }
@@ -272,6 +278,21 @@
                 activeCarambolaBanner = null;
                 switchScreen(elScreenLobby);
                 showToast("Saliste de la partida");
+            });
+        }
+
+        // Mobile Scoreboard Drawer toggle
+        const btnOpenScoreboard = document.getElementById('btn-open-scoreboard');
+        const btnCloseScoreboard = document.getElementById('btn-close-scoreboard');
+        const chalkboardDrawer = document.getElementById('chalkboard-container');
+        if (btnOpenScoreboard && chalkboardDrawer) {
+            btnOpenScoreboard.addEventListener('click', () => {
+                chalkboardDrawer.classList.add('open');
+            });
+        }
+        if (btnCloseScoreboard && chalkboardDrawer) {
+            btnCloseScoreboard.addEventListener('click', () => {
+                chalkboardDrawer.classList.remove('open');
             });
         }
 
@@ -465,7 +486,14 @@
         [elScreenLobby, elScreenWaiting, elScreenGame].forEach(s => s.classList.remove('active'));
         screenEl.classList.add('active');
         if (screenEl === elScreenGame) {
-            resizeCanvas();
+            document.body.classList.add('in-gameplay');
+            requestAnimationFrame(() => {
+                resizeCanvas();
+            });
+        } else {
+            document.body.classList.remove('in-gameplay');
+            const drawer = document.getElementById('chalkboard-container');
+            if (drawer) drawer.classList.remove('open');
         }
     }
 
@@ -543,6 +571,17 @@
         document.getElementById('scoreboard-round').textContent = `Ronda ${room.round_number}`;
         document.getElementById('scoreboard-target').textContent = `Meta: ${room.settings.target_points} pts`;
 
+        // Update Mobile HUD
+        const elMobRound = document.getElementById('mobile-hud-round');
+        if (elMobRound) {
+            elMobRound.textContent = `R${room.round_number} • ${room.settings.target_points} pts`;
+        }
+        const myP = room.players.find(p => p.id === myPlayerId);
+        const elMobScore = document.getElementById('mobile-hud-score');
+        if (elMobScore && myP) {
+            elMobScore.textContent = `${myP.score} pts`;
+        }
+
         elScoreboardTable.innerHTML = '';
 
         // Sort by score descending
@@ -567,9 +606,14 @@
     }
 
     function updateTurnHeader(room) {
+        const elMobStatus = document.getElementById('mobile-hud-status');
+        const elMobTurnPill = document.getElementById('mobile-hud-turn');
+
         if (!room || room.phase !== 'throwing') {
             elActiveThrowerName.textContent = room && room.phase === 'round_review' ? 'Dictamen del Cantinero...' : 'Fin de Partida';
             elTurnTimer.style.display = 'none';
+            if (elMobStatus) elMobStatus.textContent = room && room.phase === 'round_review' ? 'Dictamen...' : 'Pausa';
+            if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
             clearInterval(timerInterval);
             if (elFlickInstruction) elFlickInstruction.textContent = "Partida en pausa";
             return;
@@ -583,14 +627,20 @@
         if (activeFlightAnimation !== null || isWaitingForNextTurn) {
             elActiveThrowerName.textContent = "🪙 Moneda en movimiento...";
             elActiveThrowerName.style.color = "var(--gold-glow)";
+            if (elMobStatus) elMobStatus.textContent = "🪙 En vuelo...";
+            if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
             if (elFlickInstruction) elFlickInstruction.textContent = "Esperando a que la moneda se asiente en el barro...";
         } else if (isMe) {
             elActiveThrowerName.textContent = '¡ES TU TURNO DE TIRAR!';
             elActiveThrowerName.style.color = activePlayer.color;
+            if (elMobStatus) elMobStatus.textContent = "¡Tu Turno!";
+            if (elMobTurnPill) elMobTurnPill.classList.add('my-turn');
             if (elFlickInstruction) elFlickInstruction.textContent = "👆 ¡Es tu turno! Desliza tu dedo hacia adelante o arrastra hacia atrás";
         } else {
             elActiveThrowerName.textContent = `Tira ${activePlayer.name}`;
             elActiveThrowerName.style.color = activePlayer.color;
+            if (elMobStatus) elMobStatus.textContent = `Tira ${activePlayer.name}`;
+            if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
             if (elFlickInstruction) elFlickInstruction.textContent = `⏳ ${activePlayer.name} está midiendo su tiro a la raya...`;
         }
 
@@ -601,6 +651,8 @@
             timerInterval = setInterval(() => {
                 const remaining = Math.max(0, Math.ceil((room.turn_deadline_unix_ms - Date.now()) / 1000));
                 elTurnTimer.textContent = `⏱️ ${remaining}s`;
+                const elMobTimer = document.getElementById('mobile-hud-timer');
+                if (elMobTimer) elMobTimer.textContent = `⏱️ ${remaining}s`;
                 if (remaining <= 5) {
                     elTurnTimer.classList.add('urgent');
                 } else {
@@ -773,12 +825,14 @@
         canvas = document.getElementById('rayuela-canvas');
         ctx = canvas.getContext('2d');
         window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 150));
         setupPointerEvents();
     }
 
     function resizeCanvas() {
         if (!canvas) return;
         const rect = canvas.parentElement.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
         const dpr = window.devicePixelRatio || 1;
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
@@ -826,7 +880,9 @@
 
         // Power derived from pull-down distance (sling style) or flick
         const dist = Math.sqrt(dx * dx + dy * dy);
-        aimingPower = (0.2 + (dist / 220.0)).clamp(0.15, 0.95);
+        const isMobileScreen = canvas && (canvas.width / (window.devicePixelRatio || 1) < 650);
+        const maxDragDist = isMobileScreen ? 170.0 : 220.0;
+        aimingPower = (0.2 + (dist / maxDragDist)).clamp(0.15, 0.95);
 
         // Update indicators
         elAngleValue.textContent = `${aimingAngleDeg >= 0 ? '+' : ''}${aimingAngleDeg.toFixed(1)}°`;
@@ -879,30 +935,38 @@
 
     // --- Perspective & Projection Mathematics ---
     function worldToScreen25D(wx, wy, wz, width, height) {
-        // Perspective camera parameters
-        // wy: 0.0 (throw line) to 4.8 (back of cajon)
-        // wx: -1.2 to 1.2
-        const horizonY = height * 0.22;
-        const throwY = height * 0.88;
+        const isMobile = width < 650 || (width / height < 0.9);
+
+        // Responsive horizon and throw line
+        const horizonY = isMobile ? height * 0.13 : height * 0.22;
+        const throwY = isMobile ? height * 0.81 : height * 0.88;
         const depthRange = 5.0;
 
-        // Depth perspective scale: 1.0 at throw line, ~0.35 at back of box
+        // Depth perspective scale:
+        // On mobile, keep perspective less compressed so the far cajón remains big and legible
         const depthFrac = (wy / depthRange).clamp(0.0, 1.0);
-        const scale = 1.0 - (depthFrac * 0.65);
+        const taper = isMobile ? 0.36 : 0.65;
+        const scale = 1.0 - (depthFrac * taper);
 
-        const screenX = (width / 2) + (wx * (width * 0.42) * scale);
-        const screenY = throwY - (depthFrac * (throwY - horizonY)) - (wz * 180 * scale);
+        // Lateral width scale:
+        // On mobile portrait, make the court fill 94% of screen width for clear touch targets
+        const lateralFactor = isMobile ? 0.94 : 0.42;
+
+        const screenX = (width / 2) + (wx * (width * lateralFactor) * scale);
+        const screenY = throwY - (depthFrac * (throwY - horizonY)) - (wz * (isMobile ? 130 : 180) * scale);
 
         return { x: screenX, y: screenY, scale };
     }
 
     function worldToScreenOverhead(wx, wy, width, height) {
-        // Orthographic camera centered over Cajón de Barro
-        // Box bounds: X: -0.5 to 0.5 (1.0m), Y: 3.0 to 4.5 (1.5m)
+        const isMobile = width < 650 || (width / height < 0.9);
         const boxCenterY = 3.75;
         const boxCenterX = 0.0;
 
-        const zoom = Math.min(width / 1.4, height / 2.0);
+        // Zoom: on mobile portrait, fill 85% of screen width
+        const zoom = isMobile
+            ? Math.min(width / 1.15, height / 1.7)
+            : Math.min(width / 1.4, height / 2.0);
 
         const screenX = (width / 2) + ((wx - boxCenterX) * zoom);
         const screenY = (height / 2) + ((wy - boxCenterY) * zoom);
@@ -1418,7 +1482,9 @@
     // --- Vibrant & Distinct Coin Drawing ---
     function drawPerspectiveCoin(ctx, x, y, scale, coin, inAir = false, tiltY = 1.0, spinAngle = 0) {
         ctx.save();
-        const r = 21 * scale;
+        const isMobileScreen = canvas && (canvas.width / (window.devicePixelRatio || 1) < 650);
+        const baseR = isMobileScreen ? 27 : 21;
+        const r = baseR * scale;
         const ry = r * 0.52 * tiltY; // Vertical foreshortening + 3D tumbling tilt
 
         const playerColor = coin.color || '#f59e0b';
@@ -1484,9 +1550,9 @@
         ctx.stroke();
 
         // 4. Center Emblem: Player Avatar stamped directly in center!
-        if (scale > 0.45 && tiltY > 0.45) {
+        if (scale > 0.35 && tiltY > 0.35) {
             ctx.fillStyle = '#ffffff';
-            ctx.font = `bold ${Math.max(10, Math.round(12 * scale))}px sans-serif`;
+            ctx.font = `bold ${Math.max(11, Math.round((isMobileScreen ? 16 : 13) * scale))}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(coin.avatar || '🪙', x, y);
@@ -1506,7 +1572,7 @@
         ctx.restore();
 
         // 6. Name Label Pill for Settled Coins on the table
-        if (!inAir && scale > 0.38) {
+        if (!inAir && scale > 0.30) {
             ctx.save();
             const labelY = y - ry - (12 * scale);
             const nameText = coin.player_name || 'Jugador';

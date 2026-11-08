@@ -218,7 +218,8 @@
       <div class="arena-layout">
 
         <!-- Chalkboard Scoreboard -->
-        <aside class="chalkboard-container">
+        <aside id="chalkboard-container" class="chalkboard-container">
+          <button id="btn-close-scoreboard" class="btn-close-drawer" title="Volver al juego">✕ Volver a la Mesa</button>
           <div class="game-nav-bar">
             <button id="btn-toggle-voice" class="btn-nav-action" title="Activar/Silenciar Narrador">🎙️ Voz ON</button>
             <button id="btn-exit-game" class="btn-nav-action btn-nav-danger" title="Salir de la partida">🚪 Salir</button>
@@ -246,6 +247,19 @@
 
         <!-- 2.5D Canvas Viewport -->
         <div class="canvas-viewport-wrapper">
+          <!-- Mobile Top HUD Bar (visible only on mobile) -->
+          <div id="mobile-game-hud" class="mobile-game-hud">
+            <div class="hud-pill hud-round" id="mobile-hud-round">R1 • 15 pts</div>
+            <div class="hud-pill hud-turn" id="mobile-hud-turn">
+              <span id="mobile-hud-timer">⏱️ 20s</span>
+              <span id="mobile-hud-status">¡Tu Turno!</span>
+            </div>
+            <div class="hud-actions">
+              <button id="btn-open-scoreboard" class="btn-hud" title="Ver Pizarra">📋 <span id="mobile-hud-score">0 pts</span></button>
+              <button id="btn-mobile-exit" class="btn-hud btn-hud-danger" title="Salir de la partida">🚪</button>
+            </div>
+          </div>
+
           <canvas id="rayuela-canvas"></canvas>
 
           <!-- Bottom Throw Controls Bar -->
