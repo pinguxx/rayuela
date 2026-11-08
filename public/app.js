@@ -1294,14 +1294,6 @@
         ctx.restore();
     }
 
-        // 6. Aiming Sling / Trajectory Preview
-        if (isDragging && isMyTurn()) {
-            drawAimingTrajectory(ctx, w, h);
-        }
-
-        ctx.restore();
-    }
-
     // --- Vibrant & Distinct Coin Drawing ---
     function drawPerspectiveCoin(ctx, x, y, scale, coin, inAir = false, tiltY = 1.0, spinAngle = 0) {
         ctx.save();
