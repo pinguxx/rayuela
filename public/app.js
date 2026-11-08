@@ -489,6 +489,9 @@
             document.body.classList.add('in-gameplay');
             requestAnimationFrame(() => {
                 resizeCanvas();
+                requestAnimationFrame(() => {
+                    resizeCanvas();
+                });
             });
         } else {
             document.body.classList.remove('in-gameplay');
@@ -831,11 +834,12 @@
 
     function resizeCanvas() {
         if (!canvas) return;
-        const rect = canvas.parentElement.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
+        const rect = canvas.parentElement ? canvas.parentElement.getBoundingClientRect() : null;
+        if (!rect || rect.width === 0 || rect.height === 0) return;
         const dpr = window.devicePixelRatio || 1;
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
     }
 
@@ -978,6 +982,18 @@
         function render(now) {
             animationFrameId = requestAnimationFrame(render);
             if (!canvas || !ctx) return;
+
+            // Auto-detect container resize (e.g. mobile URL bar hiding/showing, orientation change, screen transition)
+            const parent = canvas.parentElement;
+            if (parent) {
+                const rect = parent.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                const targetW = Math.round(rect.width * dpr);
+                const targetH = Math.round(rect.height * dpr);
+                if (rect.width > 0 && rect.height > 0 && (canvas.width !== targetW || canvas.height !== targetH)) {
+                    resizeCanvas();
+                }
+            }
 
             const w = canvas.width / (window.devicePixelRatio || 1);
             const h = canvas.height / (window.devicePixelRatio || 1);
