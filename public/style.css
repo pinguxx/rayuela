@@ -305,6 +305,45 @@ main {
   color: #a8a29e;
 }
 
+/* In-Game Navigation Bar */
+.game-nav-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-nav-action {
+  flex: 1;
+  background: #1c0e06;
+  border: 1px solid #78350f;
+  color: #fef08a;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.btn-nav-action:hover {
+  background: #2a1409;
+  border-color: var(--gold-centenario);
+}
+
+.btn-nav-danger {
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+
+.btn-nav-danger:hover {
+  background: rgba(185, 28, 28, 0.25);
+  border-color: #ef4444;
+}
+
 /* Court / Cancha Selector */
 .court-selector {
   display: flex;

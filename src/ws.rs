@@ -91,6 +91,7 @@ pub enum ServerEvent {
         sim: ThrowSimulationResult,
         dicho_es: String,
         dicho_en: String,
+        room: GameRoom,
     },
     RoundFinished {
         room: GameRoom,
@@ -475,6 +476,7 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                                         sim,
                                         dicho_es: d_es.to_string(),
                                         dicho_en: d_en.to_string(),
+                                        room: room.clone(),
                                     };
 
                                     let room_clone = room.clone();
@@ -684,6 +686,7 @@ pub fn start_background_maintenance(state: AppState) {
                                         sim,
                                         dicho_es: d_es.to_string(),
                                         dicho_en: d_en.to_string(),
+                                        room: room.clone(),
                                     });
 
                                     if room.phase == GamePhase::RoundReview {

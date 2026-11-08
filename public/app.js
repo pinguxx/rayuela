@@ -31,6 +31,8 @@
     let ctx = null;
     let animationFrameId = null;
     let activeFlightAnimation = null;
+    let pendingLaunch = null;
+    let activeCarambolaBanner = null;
     let isWaitingForNextTurn = false;
     let clayParticles = [];
     let claySkidMarks = [];
@@ -83,7 +85,11 @@
         if (savedSkin) selectedCoinSkin = savedSkin;
 
         const savedCourt = localStorage.getItem('rayuela_court');
-        if (savedCourt) selectedCourtTheme = savedCourt;
+        if (savedCourt && savedCourt !== 'patio_hacienda') {
+            selectedCourtTheme = savedCourt;
+        } else {
+            selectedCourtTheme = 'cajon_barro';
+        }
 
         renderLobbyCustomizers();
         startRenderLoop();
@@ -223,6 +229,64 @@
         });
 
         elBtnDownloadTrophy.addEventListener('click', downloadVictoryTrophy);
+
+        // Leave waiting room button
+        const btnLeaveWaiting = document.getElementById('btn-leave-waiting');
+        if (btnLeaveWaiting) {
+            btnLeaveWaiting.addEventListener('click', () => {
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                currentRoom = null;
+                switchScreen(elScreenLobby);
+                showToast("Regresaste al menú principal");
+            });
+        }
+
+        // In-game Exit button & Confirmation Modal
+        const btnExit = document.getElementById('btn-exit-game');
+        const modalExit = document.getElementById('modal-exit-confirm');
+        const btnCancelExit = document.getElementById('btn-cancel-exit');
+        const btnConfirmExit = document.getElementById('btn-confirm-exit');
+        if (btnExit && modalExit) {
+            btnExit.addEventListener('click', () => {
+                modalExit.classList.add('active');
+            });
+        }
+        if (btnCancelExit && modalExit) {
+            btnCancelExit.addEventListener('click', () => {
+                modalExit.classList.remove('active');
+            });
+        }
+        if (btnConfirmExit && modalExit) {
+            btnConfirmExit.addEventListener('click', () => {
+                modalExit.classList.remove('active');
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                currentRoom = null;
+                activeFlightAnimation = null;
+                pendingLaunch = null;
+                activeCarambolaBanner = null;
+                switchScreen(elScreenLobby);
+                showToast("Saliste de la partida");
+            });
+        }
+
+        // In-game Voice narrator toggle button
+        const btnVoice = document.getElementById('btn-toggle-voice');
+        if (btnVoice) {
+            btnVoice.addEventListener('click', () => {
+                if (audio) {
+                    audio.speechEnabled = !audio.speechEnabled;
+                    btnVoice.textContent = audio.speechEnabled ? '🎙️ Voz ON' : '🔇 Voz OFF';
+                    btnVoice.style.opacity = audio.speechEnabled ? '1.0' : '0.6';
+                    showToast(audio.speechEnabled ? '🎙️ Narrador cantinero activado' : '🔇 Narrador en silencio');
+                }
+            });
+        }
 
         // Cantina reactions buttons
         document.querySelectorAll('.btn-reaction').forEach(btn => {
@@ -427,8 +491,7 @@
 
         const courtNames = {
             'cajon_barro': '🏺 Cajón de Barro tradicional',
-            'piso_pared': '🏛️ Piso & Pared (Rebote y Carambola)',
-            'patio_hacienda': '🎪 Patio de Hacienda (Empedrado festivo)'
+            'piso_pared': '🏛️ Piso & Pared (Rebote y Carambola)'
         };
         const elCourtDisplay = document.getElementById('waiting-court-display');
         if (elCourtDisplay) {
@@ -575,6 +638,10 @@
     function handleThrowAnimation(ev) {
         const { sim, dicho_es } = ev;
 
+        if (ev.room) {
+            currentRoom = ev.room;
+        }
+
         audio.playCoinFlight();
 
         // Build knockouts map for responsive victim coin recoil
@@ -588,13 +655,20 @@
         // Calibrate animation duration so flight, bounce, and carambola slides are crystal clear
         const animDurationMs = Math.max(1600, Math.min(2500, sim.flight_duration_s * 1000 * 1.35));
 
+        // Seamless handoff from client-side pending launch if this was the local player's throw
+        let startOffset = 0;
+        if (pendingLaunch) {
+            startOffset = Math.min(performance.now() - pendingLaunch.startTime, 350);
+            pendingLaunch = null;
+        }
+
         activeFlightAnimation = {
             sim,
             trajectory: sim.trajectory,
             coin: sim.coin,
             knockoutsMap,
             animDurationMs,
-            startTime: performance.now(),
+            startTime: performance.now() - startOffset,
             triggeredBounces: new Set(),
             triggeredKnockouts: new Set(),
             onComplete: () => {
@@ -608,8 +682,11 @@
                     audio.playClavada();
                 }
 
-                // Speak and show cantina banter
-                audio.speakDicho(dicho_es);
+                // Selective speech: only speak on highlights (Rayada, Clavada, Carambola, OffBox)
+                const isHighlight = sim.coin.is_on_line || sim.was_clavada || (sim.knockouts && sim.knockouts.length > 0) || sim.coin.status === 'OffBox';
+                if (isHighlight) {
+                    audio.speakDicho(dicho_es);
+                }
                 showBanterBubble(ev.player_name, ev.avatar, dicho_es, sim.coin.is_on_line ? '🎯' : '🪙');
 
                 // Buffer pause: give player 1.4s to absorb where coin landed before next throw
@@ -617,6 +694,7 @@
                     isWaitingForNextTurn = false;
                     if (currentRoom) {
                         updateTurnHeader(currentRoom);
+                        renderScoreboard(currentRoom);
                     }
                 }, 1400);
             }
@@ -716,14 +794,14 @@
 
     function isMyTurn() {
         if (!currentRoom || currentRoom.phase !== 'throwing') return false;
-        if (activeFlightAnimation !== null || isWaitingForNextTurn) return false;
+        if (activeFlightAnimation !== null || pendingLaunch !== null || isWaitingForNextTurn) return false;
         const activeId = currentRoom.turn_order[currentRoom.turn_index];
         return activeId === myPlayerId;
     }
 
     function onPointerDown(e) {
         if (!isMyTurn()) {
-            if (activeFlightAnimation !== null || isWaitingForNextTurn) {
+            if (activeFlightAnimation !== null || pendingLaunch !== null || isWaitingForNextTurn) {
                 showToast("Espera a que la moneda se detenga en el barro");
             }
             return;
@@ -765,7 +843,25 @@
         const totalDist = Math.sqrt(dx * dx + dy * dy);
 
         if (totalDist > 25 && isMyTurn()) {
-            // Execute pitch!
+            // Immediate client-side launch: coin begins flight instantly without disappearing
+            pendingLaunch = {
+                startTime: performance.now(),
+                power: aimingPower,
+                angleDeg: aimingAngleDeg,
+                elevationDeg: aimingElevation,
+                coin: {
+                    id: 'local_launch_' + Date.now(),
+                    player_id: myPlayerId,
+                    player_name: elPlayerName.value.trim() || 'Tú',
+                    avatar: selectedAvatar,
+                    color: selectedColor,
+                    coin_skin: selectedCoinSkin,
+                }
+            };
+
+            audio.playCoinFlight();
+
+            // Execute pitch to server
             sendWsAction({
                 action: 'throw_coin',
                 angle_deg: aimingAngleDeg,
@@ -941,115 +1037,6 @@
             ctx.lineWidth = 9;
             ctx.stroke();
 
-        } else if (courtTheme === 'patio_hacienda') {
-            // --- COURT 3: PATIO DE HACIENDA (Cobblestones & Papel Picado) ---
-            const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
-            floorGrad.addColorStop(0, '#1c1007');
-            floorGrad.addColorStop(0.5, '#2e190c');
-            floorGrad.addColorStop(1, '#1b0e06');
-            ctx.fillStyle = floorGrad;
-            ctx.fillRect(0, 0, w, h);
-
-            // Cobblestone perspective pavers
-            ctx.strokeStyle = 'rgba(120, 53, 15, 0.35)';
-            ctx.lineWidth = 1.5;
-            for (let x = -1.2; x <= 1.2; x += 0.35) {
-                const p1 = worldToScreen25D(x, 0.0, 0.0, w, h);
-                const p2 = worldToScreen25D(x, 4.8, 0.0, w, h);
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.stroke();
-            }
-
-            // Terracotta court borders
-            const c1 = worldToScreen25D(-0.55, 2.95, 0.04, w, h);
-            const c2 = worldToScreen25D(0.55, 2.95, 0.04, w, h);
-            const c3 = worldToScreen25D(0.55, 4.55, 0.04, w, h);
-            const c4 = worldToScreen25D(-0.55, 4.55, 0.04, w, h);
-            ctx.fillStyle = '#431407';
-            ctx.beginPath();
-            ctx.moveTo(c1.x, c1.y);
-            ctx.lineTo(c2.x, c2.y);
-            ctx.lineTo(c3.x, c3.y);
-            ctx.lineTo(c4.x, c4.y);
-            ctx.closePath();
-            ctx.fill();
-
-            // Cobblestone Bed
-            const b1 = worldToScreen25D(-0.50, 3.0, 0.0, w, h);
-            const b2 = worldToScreen25D(0.50, 3.0, 0.0, w, h);
-            const b3 = worldToScreen25D(0.50, 4.5, 0.0, w, h);
-            const b4 = worldToScreen25D(-0.50, 4.5, 0.0, w, h);
-            const cobbleGrad = ctx.createLinearGradient(0, b3.y, 0, b1.y);
-            cobbleGrad.addColorStop(0, '#59250a');
-            cobbleGrad.addColorStop(0.5, '#7c2d12');
-            cobbleGrad.addColorStop(1, '#501e07');
-            ctx.fillStyle = cobbleGrad;
-            ctx.beginPath();
-            ctx.moveTo(b1.x, b1.y);
-            ctx.lineTo(b2.x, b2.y);
-            ctx.lineTo(b3.x, b3.y);
-            ctx.lineTo(b4.x, b4.y);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.strokeStyle = '#b45309';
-            ctx.lineWidth = 3.5;
-            ctx.stroke();
-
-            // Center Line: Chiseled stone with white lime
-            const r1 = worldToScreen25D(-0.50, 3.75, 0.0, w, h);
-            const r2 = worldToScreen25D(0.50, 3.75, 0.0, w, h);
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 3.5;
-            ctx.beginPath();
-            ctx.moveTo(r1.x, r1.y);
-            ctx.lineTo(r2.x, r2.y);
-            ctx.stroke();
-
-            // Festive Mexican Papel Picado Bunting across the top
-            const flags = ['#ec4899', '#06b6d4', '#eab308', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#06b6d4'];
-            const flagCount = flags.length;
-            const flagW = w / (flagCount + 1);
-            const now = Date.now();
-
-            ctx.save();
-            ctx.strokeStyle = 'rgba(254, 240, 138, 0.6)';
-            ctx.lineWidth = 1.8;
-            ctx.beginPath();
-            ctx.moveTo(0, h * 0.08);
-            ctx.quadraticCurveTo(w / 2, h * 0.16, w, h * 0.08);
-            ctx.stroke();
-
-            for (let i = 0; i < flagCount; i++) {
-                const fx = (i + 0.6) * flagW;
-                const sag = Math.sin((i / flagCount) * Math.PI) * (h * 0.07);
-                const fy = h * 0.08 + sag;
-                const sway = Math.sin(now * 0.0025 + i * 0.8) * 0.08;
-
-                ctx.save();
-                ctx.translate(fx, fy);
-                ctx.rotate(sway);
-                ctx.fillStyle = flags[i];
-                ctx.beginPath();
-                ctx.moveTo(-16, 0);
-                ctx.lineTo(16, 0);
-                ctx.lineTo(16, 26);
-                ctx.lineTo(0, 34);
-                ctx.lineTo(-16, 26);
-                ctx.closePath();
-                ctx.fill();
-
-                // Small incandescent light bulb above each flag
-                ctx.fillStyle = '#fef08a';
-                ctx.beginPath();
-                ctx.arc(0, -3, 3, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            }
-            ctx.restore();
-
         } else {
             // --- COURT 1: CAJÓN DE BARRO (Traditional Wet Clay Pit) ---
             const floorGrad = ctx.createLinearGradient(0, h * 0.22, 0, h);
@@ -1156,8 +1143,12 @@
         // 2. Render Settled Coins on the Court
         if (currentRoom && currentRoom.current_round_coins) {
             currentRoom.current_round_coins.forEach(coin => {
-                // If this is the coin currently flying in activeFlightAnimation, DO NOT DRAW IT HERE!
+                // If this is the coin currently flying in activeFlightAnimation, skip!
                 if (activeFlightAnimation && activeFlightAnimation.coin && coin.id === activeFlightAnimation.coin.id) {
+                    return;
+                }
+                // If this is the coin currently launched locally, skip!
+                if (pendingLaunch && pendingLaunch.coin && coin.player_id === myPlayerId) {
                     return;
                 }
 
@@ -1192,7 +1183,7 @@
             });
         }
 
-        // 3. Render Active In-Flight / Bouncing / Knockout Coin
+        // 3a. Render Active In-Flight / Bouncing / Knockout Coin
         if (activeFlightAnimation) {
             const anim = activeFlightAnimation;
             const elapsed = performance.now() - anim.startTime;
@@ -1234,10 +1225,6 @@
                         audio.playBounceTile();
                         triggerCameraShake(3);
                         spawnSparks(traj[i].x, traj[i].y);
-                    } else if (courtTheme === 'patio_hacienda') {
-                        audio.playCobbleBounce();
-                        triggerCameraShake(4);
-                        spawnClayParticles(traj[i].x, traj[i].y, '#f59e0b');
                     } else {
                         audio.playClayThud();
                         triggerCameraShake(4);
@@ -1257,7 +1244,14 @@
                         audio.playCoinKnockout();
                         triggerCameraShake(8);
                         spawnSparks(k.collision_x, k.collision_y);
-                        showToast(`💥 ¡Carambola! ${anim.coin.player_name} golpeó la moneda de ${k.victim_player_name}`);
+                        addClaySkidMark(k.old_x, k.old_y, k.new_x, k.new_y);
+                        activeCarambolaBanner = {
+                            text: k.was_on_line
+                                ? `💥 ¡CARAMBOLA MAESTRA! ${anim.coin.player_name} desbancó a ${k.victim_player_name}`
+                                : `💥 ¡CARAMBOLA! ${anim.coin.player_name} sacó la moneda de ${k.victim_player_name}`,
+                            expireTime: performance.now() + 2600
+                        };
+                        showToast(activeCarambolaBanner.text);
                     }
                 });
             }
@@ -1286,9 +1280,136 @@
             }
         }
 
-        // 4. Aiming Sling / Trajectory Preview
-        if (isDragging && isMyTurn()) {
-            drawAimingTrajectory(ctx, w, h);
+        // 3b. Render Immediate Client-Side Flight (Pending server confirmation)
+        if (pendingLaunch && !activeFlightAnimation) {
+            const now = performance.now();
+            const t = (now - pendingLaunch.startTime) / 1000;
+            const radAngle = (pendingLaunch.angleDeg * Math.PI) / 180;
+            const radElev = (pendingLaunch.elevationDeg * Math.PI) / 180;
+            const speed = 4.2 + (pendingLaunch.power * 4.4);
+            const vx = speed * Math.cos(radElev) * Math.sin(radAngle);
+            const vy = speed * Math.cos(radElev) * Math.cos(radAngle);
+            const vz = speed * Math.sin(radElev);
+
+            const curX = vx * t;
+            const curY = 0.2 + vy * t;
+            const curZ = Math.max(0.0, 0.12 + vz * t - 0.5 * 9.81 * t * t);
+            const inAir = curZ > 0.02;
+            const flips = inAir ? 4.5 : 0;
+            const tiltY = inAir ? (Math.abs(Math.cos(t * Math.PI * 2 * flips)) * 0.72 + 0.28) : 1.0;
+
+            // Ground shadow
+            const shadowP = worldToScreen25D(curX, curY, 0.0, w, h);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.50)';
+            ctx.beginPath();
+            ctx.ellipse(shadowP.x, shadowP.y, 18 * shadowP.scale, 9 * shadowP.scale, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Flying coin
+            const airP = worldToScreen25D(curX, curY, curZ, w, h);
+            drawPerspectiveCoin(ctx, airP.x, airP.y, airP.scale * (inAir ? 1.15 : 1.0), pendingLaunch.coin, inAir, tiltY, 0);
+        }
+
+        // 4. Idle Ready Coin on Throw Line OR Dragging Slingshot
+        if (isMyTurn() && !activeFlightAnimation && !pendingLaunch) {
+            const myPlayerCoin = {
+                id: 'my_ready_coin',
+                player_id: myPlayerId,
+                player_name: (currentRoom && currentRoom.players.find(p => p.id === myPlayerId)?.name) || 'Tú',
+                avatar: selectedAvatar,
+                color: selectedColor,
+                coin_skin: selectedCoinSkin,
+            };
+
+            const tlCenter = worldToScreen25D(0.0, 0.2, 0.0, w, h);
+
+            if (isDragging) {
+                // Elastic cords from throw line anchors to the dragged coin
+                const anchorL = worldToScreen25D(-0.25, 0.2, 0.0, w, h);
+                const anchorR = worldToScreen25D(0.25, 0.2, 0.0, w, h);
+
+                ctx.save();
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(anchorL.x, anchorL.y);
+                ctx.lineTo(dragCurrentPos.x, dragCurrentPos.y);
+                ctx.moveTo(anchorR.x, anchorR.y);
+                ctx.lineTo(dragCurrentPos.x, dragCurrentPos.y);
+                ctx.stroke();
+
+                // Draw aiming trajectory
+                drawAimingTrajectory(ctx, w, h);
+
+                // Draw coin following the drag handle
+                drawPerspectiveCoin(ctx, dragCurrentPos.x, dragCurrentPos.y, tlCenter.scale * 1.05, myPlayerCoin, false, 0.9, 0);
+                ctx.restore();
+            } else {
+                // Idle resting coin on the throw line with pulsing glow
+                const pulse = Math.sin(performance.now() * 0.005) * 0.15 + 0.85;
+
+                ctx.save();
+                // Subtle golden aura ring
+                ctx.strokeStyle = `rgba(245, 158, 11, ${pulse * 0.6})`;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.ellipse(tlCenter.x, tlCenter.y, 28 * tlCenter.scale * pulse, 15 * tlCenter.scale * pulse, 0, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Ready coin
+                drawPerspectiveCoin(ctx, tlCenter.x, tlCenter.y, tlCenter.scale, myPlayerCoin, false, 1.0, 0);
+
+                // Interactive prompt banner above coin
+                const promptY = tlCenter.y - 36 * tlCenter.scale;
+                ctx.fillStyle = `rgba(20, 10, 5, 0.85)`;
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 1.5;
+                ctx.font = 'bold 12px sans-serif';
+                const promptText = '👆 Arrastra hacia abajo para lanzar';
+                const pMetrics = ctx.measureText(promptText);
+                const pw = pMetrics.width + 20;
+                const ph = 24;
+
+                ctx.beginPath();
+                ctx.roundRect(tlCenter.x - pw / 2, promptY - ph / 2, pw, ph, 12);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#fef08a';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(promptText, tlCenter.x, promptY);
+                ctx.restore();
+            }
+        }
+
+        // 5. Arcade Carambola Banner Overlay
+        if (activeCarambolaBanner && performance.now() < activeCarambolaBanner.expireTime) {
+            const remaining = activeCarambolaBanner.expireTime - performance.now();
+            const bannerAlpha = Math.min(1.0, remaining / 300);
+
+            ctx.save();
+            ctx.globalAlpha = bannerAlpha;
+            const bx = w / 2;
+            const by = h * 0.15;
+            ctx.font = 'bold 15px "Cinzel", Georgia, serif';
+            const bMetrics = ctx.measureText(activeCarambolaBanner.text);
+            const bw = Math.max(280, bMetrics.width + 40);
+            const bh = 36;
+
+            ctx.fillStyle = 'rgba(15, 6, 2, 0.92)';
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.roundRect(bx - bw / 2, by - bh / 2, bw, bh, 8);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#fef08a';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(activeCarambolaBanner.text, bx, by);
+            ctx.restore();
         }
 
         ctx.restore();
@@ -1435,14 +1556,24 @@
         const targetY = 3.0 + (aimingPower * 1.5);
         const targetX = (aimingAngleDeg / 25.0) * 0.45;
 
-        for (let t = 0.1; t <= 1.0; t += 0.1) {
+        for (let t = 0.1; t <= 1.0; t += 0.08) {
             const wy = 0.2 + (t * (targetY - 0.2));
             const wx = t * targetX;
-            const wz = Math.sin(t * Math.PI) * 0.75;
+            const wz = Math.sin(t * Math.PI) * 0.45;
             const pt = worldToScreen25D(wx, wy, wz, w, h);
             ctx.lineTo(pt.x, pt.y);
         }
         ctx.stroke();
+
+        // Target reticle on ground
+        const pEnd = worldToScreen25D(targetX, targetY, 0.0, w, h);
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(254, 240, 138, 0.75)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(pEnd.x, pEnd.y, 14 * pEnd.scale, 7 * pEnd.scale, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.restore();
     }
 
@@ -1473,14 +1604,8 @@
             // Back wall at top
             ctx.fillStyle = '#451a03';
             ctx.fillRect(topLeft.x, topLeft.y, boxW, 14);
-        } else if (courtTheme === 'patio_hacienda') {
-            ctx.fillStyle = '#7c2d12';
-            ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
-            ctx.strokeStyle = '#b45309';
-            ctx.lineWidth = 6;
-            ctx.strokeRect(topLeft.x, topLeft.y, boxW, boxH);
         } else {
-            // Clay bed
+            // Traditional Cajón de Barro Clay bed
             ctx.fillStyle = '#5c3008';
             ctx.fillRect(topLeft.x, topLeft.y, boxW, boxH);
             // Wooden frame

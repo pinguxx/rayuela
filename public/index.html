@@ -116,14 +116,7 @@
               <div class="court-icon">🏛️</div>
               <div class="court-info">
                 <h4>Piso & Pared</h4>
-                <p>Baldosa de cantina, rebote vivo y carambola en pared</p>
-              </div>
-            </div>
-            <div class="court-card" data-court="patio_hacienda">
-              <div class="court-icon">🎪</div>
-              <div class="court-info">
-                <h4>Patio de Hacienda</h4>
-                <p>Empedrado colonial, papel picado festivo y feria</p>
+                <p>Baldosa de cantina, rebote vivo y carambola en pared de madera</p>
               </div>
             </div>
           </div>
@@ -211,6 +204,9 @@
             <button id="btn-start-game" class="btn-primary" style="margin-top:12px;">
               🚀 ¡Iniciar Partida!
             </button>
+            <button id="btn-leave-waiting" class="btn-secondary" style="width:100%;margin-top:8px;">
+              ← Volver al Menú Principal
+            </button>
           </div>
         </div>
 
@@ -223,6 +219,11 @@
 
         <!-- Chalkboard Scoreboard -->
         <aside class="chalkboard-container">
+          <div class="game-nav-bar">
+            <button id="btn-toggle-voice" class="btn-nav-action" title="Activar/Silenciar Narrador">🎙️ Voz ON</button>
+            <button id="btn-exit-game" class="btn-nav-action btn-nav-danger" title="Salir de la partida">🚪 Salir</button>
+          </div>
+
           <div class="chalkboard-header">
             <h3 id="scoreboard-round">Ronda 1</h3>
             <div class="chalkboard-sub">
@@ -332,6 +333,21 @@
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button id="btn-copy-url" class="btn-primary" style="flex:1;">📋 Copiar Enlace</button>
         <button id="btn-close-qr" class="btn-secondary" style="flex:1;">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 4: EXIT GAME CONFIRMATION -->
+  <div id="modal-exit-confirm" class="modal-overlay">
+    <div class="modal-card" style="max-width:380px;text-align:center;">
+      <div style="font-size:38px;margin-bottom:6px;">🚪</div>
+      <h2 style="font-family:'Cinzel',serif;color:var(--gold-centenario);margin-bottom:8px;">¿Salir de la Partida?</h2>
+      <p style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:18px;">
+        ¿Deseas abandonar la mesa y volver al menú principal? Se guardará tu récord en este dispositivo.
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button id="btn-cancel-exit" class="btn-secondary" style="flex:1;">Continuar Jugando</button>
+        <button id="btn-confirm-exit" class="btn-primary" style="flex:1;background:linear-gradient(180deg,#ef4444 0%,#b91c1c 100%);box-shadow:0 4px 12px rgba(239,68,68,0.4);">Sí, Salir</button>
       </div>
     </div>
   </div>

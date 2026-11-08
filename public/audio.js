@@ -339,15 +339,48 @@ class CantinaAudio {
         });
     }
 
-    // 8. Mexican Cantina Speech Synthesis
+    // 8. Mexican Cantina Speech Synthesis (Natural Spanish Voice Selection)
+    findBestSpanishVoice() {
+        if (!('speechSynthesis' in window)) return null;
+        const voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) return null;
+
+        // 1. Natural / Neural Mexican Spanish (es-MX)
+        const mxNatural = voices.find(v =>
+            (v.lang === 'es-MX' || v.lang === 'es_MX') &&
+            (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Paulina') || v.name.includes('Raul') || v.name.includes('Sabina'))
+        );
+        if (mxNatural) return mxNatural;
+
+        // 2. Any Mexican Spanish voice
+        const mxAny = voices.find(v => v.lang === 'es-MX' || v.lang === 'es_MX');
+        if (mxAny) return mxAny;
+
+        // 3. Latin American Spanish (es-US, es-419, es-AR, es-CO)
+        const latam = voices.find(v =>
+            (v.lang.startsWith('es-') || v.lang.startsWith('es_')) &&
+            (v.lang.includes('US') || v.lang.includes('419') || v.lang.includes('CO') || v.lang.includes('AR'))
+        );
+        if (latam) return latam;
+
+        // 4. Any Spanish voice
+        return voices.find(v => v.lang.toLowerCase().startsWith('es')) || null;
+    }
+
     speakDicho(text) {
         if (!this.speechEnabled || !('speechSynthesis' in window)) return;
         try {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'es-MX';
-            utterance.rate = 1.05;
-            utterance.pitch = 0.95;
+            const voice = this.findBestSpanishVoice();
+            if (voice) {
+                utterance.voice = voice;
+                utterance.lang = voice.lang;
+            } else {
+                utterance.lang = 'es-MX';
+            }
+            utterance.rate = 0.98; // Natural, steady cantina cadence
+            utterance.pitch = 1.0; // Natural authentic pitch
             window.speechSynthesis.speak(utterance);
         } catch (e) {
             console.warn("Speech synthesis error:", e);

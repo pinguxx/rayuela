@@ -10,7 +10,7 @@ pub const BOX_MAX_Y: f32 = 4.50; // Court ends 4.5m from throw line (1.5m deep)
 pub const TARGET_LINE_Y: f32 = 3.75; // Center line (La Raya)
 pub const COIN_RADIUS: f32 = 0.038; // ~3.8cm radius (~7.6cm diameter for heavy cantina coin)
 pub const GRAVITY: f32 = 9.81;
-pub const RELEASE_HEIGHT_Z: f32 = 1.15; // Release height at player chest/waist
+pub const RELEASE_HEIGHT_Z: f32 = 0.12; // Natural release height right above throw line
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,17 +90,126 @@ fn get_court_physics(theme: &str) -> CourtPhysics {
             friction: 0.30,
             has_back_wall: true,
         },
-        "patio_hacienda" => CourtPhysics {
-            restitution: 0.28,
-            friction: 0.58,
-            has_back_wall: false,
-        },
         _ => CourtPhysics {
             // "cajon_barro" default (heavy damp clay absorbs almost all vertical bounce)
             restitution: 0.08,
             friction: 0.88,
             has_back_wall: false,
         },
+    }
+}
+
+fn check_and_apply_collision(
+    cur_x: &mut f32,
+    cur_y: &mut f32,
+    slide_dir_x: &mut f32,
+    slide_dir_y: &mut f32,
+    slide_speed: &mut f32,
+    current_time: f32,
+    existing_coins: &mut [SettledCoin],
+    knockouts: &mut Vec<KnockoutEvent>,
+    sound_cue: &mut String,
+) {
+    let min_dist = COIN_RADIUS * 2.1;
+
+    for i in 0..existing_coins.len() {
+        if existing_coins[i].status != CoinStatus::InBox && existing_coins[i].status != CoinStatus::Clavada {
+            continue;
+        }
+
+        let dx = existing_coins[i].x - *cur_x;
+        let dy = existing_coins[i].y - *cur_y;
+        let dist = (dx * dx + dy * dy).sqrt();
+
+        if dist < min_dist && dist > 0.0001 {
+            let old_x = existing_coins[i].x;
+            let old_y = existing_coins[i].y;
+            let was_on = existing_coins[i].is_on_line;
+
+            let nx = dx / dist;
+            let ny = dy / dist;
+
+            // Momentum transfer proportional to speed with a clear, visible push
+            let push_dist = (0.10 + *slide_speed * 0.12).clamp(0.08, 0.35);
+            let target_x = (old_x + nx * push_dist).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
+            let target_y = (old_y + ny * push_dist).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+
+            existing_coins[i].x = target_x;
+            existing_coins[i].y = target_y;
+
+            let new_dist = (existing_coins[i].y - TARGET_LINE_Y).abs();
+            let new_is_on = new_dist <= COIN_RADIUS;
+            existing_coins[i].is_on_line = new_is_on;
+            existing_coins[i].dist_to_line_m = if new_is_on { 0.0 } else { new_dist - COIN_RADIUS };
+            existing_coins[i].dist_to_line_mm = existing_coins[i].dist_to_line_m * 1000.0;
+            existing_coins[i].display_distance = format_distance(existing_coins[i].dist_to_line_mm, new_is_on);
+
+            // Thrown coin deflects and loses speed
+            *slide_speed *= 0.40;
+            *slide_dir_x -= nx * 0.4;
+            *slide_dir_y -= ny * 0.4;
+            let norm = (*slide_dir_x * *slide_dir_x + *slide_dir_y * *slide_dir_y).sqrt().max(0.001);
+            *slide_dir_x /= norm;
+            *slide_dir_y /= norm;
+
+            *sound_cue = "knockout".to_string();
+
+            knockouts.push(KnockoutEvent {
+                victim_coin_id: existing_coins[i].id.clone(),
+                victim_player_name: existing_coins[i].player_name.clone(),
+                collision_time_s: current_time,
+                collision_x: *cur_x,
+                collision_y: *cur_y,
+                old_x,
+                old_y,
+                new_x: existing_coins[i].x,
+                new_y: existing_coins[i].y,
+                was_on_line: was_on,
+                is_now_on_line: new_is_on,
+            });
+
+            // Secondary chain collision: check if the pushed coin strikes another coin
+            let displaced_x = existing_coins[i].x;
+            let displaced_y = existing_coins[i].y;
+            for j in 0..existing_coins.len() {
+                if j == i || (existing_coins[j].status != CoinStatus::InBox && existing_coins[j].status != CoinStatus::Clavada) {
+                    continue;
+                }
+                let c_dx = existing_coins[j].x - displaced_x;
+                let c_dy = existing_coins[j].y - displaced_y;
+                let c_dist = (c_dx * c_dx + c_dy * c_dy).sqrt();
+                if c_dist < min_dist && c_dist > 0.0001 {
+                    let c_old_x = existing_coins[j].x;
+                    let c_old_y = existing_coins[j].y;
+                    let c_was_on = existing_coins[j].is_on_line;
+                    let c_nx = c_dx / c_dist;
+                    let c_ny = c_dy / c_dist;
+                    let c_push = 0.08;
+                    existing_coins[j].x = (c_old_x + c_nx * c_push).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
+                    existing_coins[j].y = (c_old_y + c_ny * c_push).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+                    let c_new_dist = (existing_coins[j].y - TARGET_LINE_Y).abs();
+                    let c_new_is_on = c_new_dist <= COIN_RADIUS;
+                    existing_coins[j].is_on_line = c_new_is_on;
+                    existing_coins[j].dist_to_line_m = if c_new_is_on { 0.0 } else { c_new_dist - COIN_RADIUS };
+                    existing_coins[j].dist_to_line_mm = existing_coins[j].dist_to_line_m * 1000.0;
+                    existing_coins[j].display_distance = format_distance(existing_coins[j].dist_to_line_mm, c_new_is_on);
+
+                    knockouts.push(KnockoutEvent {
+                        victim_coin_id: existing_coins[j].id.clone(),
+                        victim_player_name: existing_coins[j].player_name.clone(),
+                        collision_time_s: current_time + 0.05,
+                        collision_x: displaced_x,
+                        collision_y: displaced_y,
+                        old_x: c_old_x,
+                        old_y: c_old_y,
+                        new_x: existing_coins[j].x,
+                        new_y: existing_coins[j].y,
+                        was_on_line: c_was_on,
+                        is_now_on_line: c_new_is_on,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -130,7 +239,7 @@ pub fn simulate_throw(
     let p = power.clamp(0.05, 1.0);
 
     // Speed curve calibrated so ~0.50 power lands near the center line (3.75m)
-    let speed = 3.5 + (p * 3.4);
+    let speed = 4.2 + (p * 4.4);
 
     // Initial velocity vectors
     let v_forward = speed * elev_rad.cos();
@@ -241,88 +350,61 @@ pub fn simulate_throw(
             let mut slide_dir_x = if slide_speed > 0.001 { vx / slide_speed } else { 0.0 };
             let mut slide_dir_y = if slide_speed > 0.001 { vy / slide_speed } else { 1.0 };
 
+            // Check if coin landed directly on an existing coin
+            check_and_apply_collision(
+                &mut cur_x,
+                &mut cur_y,
+                &mut slide_dir_x,
+                &mut slide_dir_y,
+                &mut slide_speed,
+                current_time,
+                existing_coins,
+                &mut knockouts,
+                &mut sound_cue,
+            );
+
             let slide_dt = 0.035;
-            let max_slide_steps = 20;
+            let sub_steps = 4;
+            let sub_dt = slide_dt / (sub_steps as f32);
+            let max_slide_steps = 22;
 
             for _ in 0..max_slide_steps {
                 if slide_speed <= 0.08 {
                     break;
                 }
 
-                current_time += slide_dt;
-                cur_x += slide_dir_x * slide_speed * slide_dt;
-                cur_y += slide_dir_y * slide_speed * slide_dt;
+                for _ in 0..sub_steps {
+                    current_time += sub_dt;
+                    cur_x += slide_dir_x * slide_speed * sub_dt;
+                    cur_y += slide_dir_y * slide_speed * sub_dt;
 
-                // Back-wall carambola rebound on Piso & Pared
-                if court.has_back_wall && cur_y >= (BOX_MAX_Y - 0.02) {
-                    cur_y = BOX_MAX_Y - 0.02;
-                    slide_dir_y = -slide_dir_y.abs(); // Rebound backwards toward line!
-                    slide_speed *= 0.65;
-                    sound_cue = "wall_bounce".to_string();
-                    trajectory.push(TrajectoryPoint {
-                        x: cur_x,
-                        y: cur_y,
-                        z: 0.0,
-                        t: current_time,
-                        is_bounce: true,
-                    });
-                }
-
-                // Check coin-on-coin collisions during slide
-                for existing in existing_coins.iter_mut() {
-                    if existing.status == CoinStatus::InBox || existing.status == CoinStatus::Clavada {
-                        let dx = existing.x - cur_x;
-                        let dy = existing.y - cur_y;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        let min_dist = COIN_RADIUS * 2.0;
-
-                        if dist < min_dist && dist > 0.0001 {
-                            // COLLISION IMPACT!
-                            let old_x = existing.x;
-                            let old_y = existing.y;
-                            let was_on = existing.is_on_line;
-
-                            let nx = dx / dist;
-                            let ny = dy / dist;
-
-                            // Momentum transfer: push victim coin along normal
-                            let push_dist = (0.06 + slide_speed * 0.08).clamp(0.04, 0.25);
-                            existing.x = (existing.x + nx * push_dist).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                            existing.y = (existing.y + ny * push_dist).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
-
-                            // Recalculate victim coin distance
-                            let new_dist = (existing.y - TARGET_LINE_Y).abs();
-                            let new_is_on = new_dist <= COIN_RADIUS;
-                            existing.is_on_line = new_is_on;
-                            existing.dist_to_line_m = if new_is_on { 0.0 } else { new_dist - COIN_RADIUS };
-                            existing.dist_to_line_mm = existing.dist_to_line_m * 1000.0;
-                            existing.display_distance = format_distance(existing.dist_to_line_mm, new_is_on);
-
-                            // Thrown coin deflects and loses speed
-                            slide_speed *= 0.40;
-                            slide_dir_x -= nx * 0.4;
-                            slide_dir_y -= ny * 0.4;
-                            let norm = (slide_dir_x * slide_dir_x + slide_dir_y * slide_dir_y).sqrt().max(0.001);
-                            slide_dir_x /= norm;
-                            slide_dir_y /= norm;
-
-                            sound_cue = "knockout".to_string();
-
-                            knockouts.push(KnockoutEvent {
-                                victim_coin_id: existing.id.clone(),
-                                victim_player_name: existing.player_name.clone(),
-                                collision_time_s: current_time,
-                                collision_x: cur_x,
-                                collision_y: cur_y,
-                                old_x,
-                                old_y,
-                                new_x: existing.x,
-                                new_y: existing.y,
-                                was_on_line: was_on,
-                                is_now_on_line: new_is_on,
-                            });
-                        }
+                    // Back-wall carambola rebound on Piso & Pared
+                    if court.has_back_wall && cur_y >= (BOX_MAX_Y - 0.02) {
+                        cur_y = BOX_MAX_Y - 0.02;
+                        slide_dir_y = -slide_dir_y.abs(); // Rebound backwards toward line!
+                        slide_speed *= 0.65;
+                        sound_cue = "wall_bounce".to_string();
+                        trajectory.push(TrajectoryPoint {
+                            x: cur_x,
+                            y: cur_y,
+                            z: 0.0,
+                            t: current_time,
+                            is_bounce: true,
+                        });
                     }
+
+                    // Check coin-on-coin collisions with zero tunneling
+                    check_and_apply_collision(
+                        &mut cur_x,
+                        &mut cur_y,
+                        &mut slide_dir_x,
+                        &mut slide_dir_y,
+                        &mut slide_speed,
+                        current_time,
+                        existing_coins,
+                        &mut knockouts,
+                        &mut sound_cue,
+                    );
                 }
 
                 // Surface friction deceleration
@@ -425,9 +507,8 @@ pub fn calculate_bot_throw(
     // Calibration: on bouncy tile, slightly less power because of bounce/slide forward
     let ideal_elevation = 28.0;
     let ideal_power = match court_theme {
-        "piso_pared" => 0.45,
-        "patio_hacienda" => 0.47,
-        _ => 0.485, // clay
+        "piso_pared" => 0.42,
+        _ => 0.465, // cajon_barro clay
     };
 
     // Lateral angle to hit target_x from (0,0)
@@ -464,7 +545,7 @@ mod tests {
             "cajon_barro",
             1,
             0.0,
-            0.485,
+            0.465,
             28.0,
             0.0,
             &mut coins,
@@ -529,7 +610,7 @@ mod tests {
             "cajon_barro",
             1,
             0.0,
-            0.505,
+            0.465,
             28.0,
             0.0,
             &mut coins,
