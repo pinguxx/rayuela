@@ -657,19 +657,29 @@
         if (!activePlayer) return;
 
         const isMe = activePlayer.id === myPlayerId;
+        const courtTheme = (room.settings && room.settings.court_theme) || selectedCourtTheme || 'cajon_barro';
+        const isPisoPared = courtTheme === 'piso_pared';
 
         if (activeFlightAnimation !== null || isWaitingForNextTurn) {
             elActiveThrowerName.textContent = "🪙 Moneda en movimiento...";
             elActiveThrowerName.style.color = "var(--gold-glow)";
             if (elMobStatus) elMobStatus.textContent = "🪙 En vuelo...";
             if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
-            if (elFlickInstruction) elFlickInstruction.textContent = "Esperando a que la moneda se asiente en el barro...";
+            if (elFlickInstruction) {
+                elFlickInstruction.textContent = isPisoPared
+                    ? "Esperando a que la moneda se detenga en la cantina..."
+                    : "Esperando a que la moneda se asiente en el barro...";
+            }
         } else if (isMe) {
             elActiveThrowerName.textContent = '¡ES TU TURNO DE TIRAR!';
             elActiveThrowerName.style.color = activePlayer.color;
             if (elMobStatus) elMobStatus.textContent = "¡Tu Turno!";
             if (elMobTurnPill) elMobTurnPill.classList.add('my-turn');
-            if (elFlickInstruction) elFlickInstruction.textContent = "👆 ¡Es tu turno! Desliza tu dedo hacia adelante o arrastra hacia atrás";
+            if (elFlickInstruction) {
+                elFlickInstruction.textContent = isPisoPared
+                    ? "👆 ¡Tu turno! Tira suave directo a la raya o fuerte para rebotar en la pared"
+                    : "👆 ¡Es tu turno! Desliza tu dedo hacia adelante o arrastra hacia atrás";
+            }
         } else {
             elActiveThrowerName.textContent = `Tira ${activePlayer.name}`;
             elActiveThrowerName.style.color = activePlayer.color;
@@ -921,7 +931,10 @@
         const dist = Math.sqrt(dx * dx + dy * dy);
         const isMobileScreen = canvas && (canvas.width / (window.devicePixelRatio || 1) < 650);
         const maxDragDist = isMobileScreen ? 170.0 : 220.0;
-        aimingPower = (0.2 + (dist / maxDragDist)).clamp(0.15, 0.95);
+        const deadzone = 6.0;
+        aimingPower = dist <= deadzone
+            ? 0.05
+            : (0.05 + ((dist - deadzone) / (maxDragDist - deadzone)) * 0.95).clamp(0.05, 1.0);
 
         // Update indicators
         elAngleValue.textContent = `${aimingAngleDeg >= 0 ? '+' : ''}${aimingAngleDeg.toFixed(1)}°`;
@@ -937,7 +950,7 @@
         const dy = dragCurrentPos.y - dragStartPos.y;
         const totalDist = Math.sqrt(dx * dx + dy * dy);
 
-        if (totalDist > 25 && isMyTurn()) {
+        if (totalDist >= 8 && isMyTurn()) {
             // Immediate client-side launch: coin begins flight instantly without disappearing
             pendingLaunch = {
                 startTime: performance.now(),
@@ -1136,7 +1149,7 @@
             ctx.fillStyle = '#fef08a';
             ctx.font = 'bold 11px Cinzel, serif';
             ctx.textAlign = 'center';
-            ctx.fillText('✦ PARED DE CARAMBOLA — REBOTE PERMITIDO ✦', w / 2, (wTL.y + wBL.y) / 2);
+            ctx.fillText('✦ PARED DE CARAMBOLA — TIRA DIRECTO O REBOTA EN LA PARED ✦', w / 2, (wTL.y + wBL.y) / 2);
 
             // Inlaid Brass Target Line at Y = 3.75m
             const r1 = worldToScreen25D(-0.9, 3.75, 0.0, w, h);
@@ -1402,7 +1415,10 @@
             const t = (now - pendingLaunch.startTime) / 1000;
             const radAngle = (pendingLaunch.angleDeg * Math.PI) / 180;
             const radElev = (pendingLaunch.elevationDeg * Math.PI) / 180;
-            const speed = 4.2 + (pendingLaunch.power * 4.4);
+            const courtTheme = (currentRoom && currentRoom.settings && currentRoom.settings.court_theme) || selectedCourtTheme || 'cajon_barro';
+            const speed = courtTheme === 'piso_pared'
+                ? 2.4 + (pendingLaunch.power * 4.8)
+                : 4.2 + (pendingLaunch.power * 4.4);
             const vx = speed * Math.cos(radElev) * Math.sin(radAngle);
             const vy = speed * Math.cos(radElev) * Math.cos(radAngle);
             const vz = speed * Math.sin(radElev);
@@ -1677,8 +1693,11 @@
         ctx.beginPath();
         ctx.moveTo(pStart.x, pStart.y);
 
-        const targetY = 3.0 + (aimingPower * 1.5);
-        const targetX = (aimingAngleDeg / 25.0) * 0.45;
+        const courtTheme = (currentRoom && currentRoom.settings && currentRoom.settings.court_theme) || selectedCourtTheme || 'cajon_barro';
+        const targetY = courtTheme === 'piso_pared'
+            ? (0.8 + (aimingPower * 4.1)).clamp(0.6, 4.5)
+            : (2.0 + (aimingPower * 2.8)).clamp(1.5, 4.5);
+        const targetX = (aimingAngleDeg / 25.0) * (courtTheme === 'piso_pared' ? 0.85 : 0.45);
 
         for (let t = 0.1; t <= 1.0; t += 0.08) {
             const wy = 0.2 + (t * (targetY - 0.2));

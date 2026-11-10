@@ -78,23 +78,35 @@ pub struct ThrowSimulationResult {
 
 /// Physical properties for each court venue
 struct CourtPhysics {
-    restitution: f32,    // Vertical bounce elasticity (0.15 = clay, 0.58 = tile)
+    restitution: f32,    // Vertical bounce elasticity (0.08 = clay, 0.48 = tile)
     friction: f32,       // Surface slide deceleration (high = clay, low = polished tile)
     has_back_wall: bool, // Reflects coins forward if hitting back wall (carambola)
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
 }
 
 fn get_court_physics(theme: &str) -> CourtPhysics {
     match theme {
         "piso_pared" => CourtPhysics {
-            restitution: 0.52,
-            friction: 0.30,
+            restitution: 0.48,
+            friction: 0.28,
             has_back_wall: true,
+            min_x: -1.10,
+            max_x: 1.10,
+            min_y: 0.15, // Playable cantina tile floor from throw line to back wall
+            max_y: 4.50, // Rebound wall at 4.5m
         },
         _ => CourtPhysics {
             // "cajon_barro" default (heavy damp clay absorbs almost all vertical bounce)
             restitution: 0.08,
             friction: 0.88,
             has_back_wall: false,
+            min_x: BOX_MIN_X,
+            max_x: BOX_MAX_X,
+            min_y: BOX_MIN_Y,
+            max_y: BOX_MAX_Y,
         },
     }
 }
@@ -105,6 +117,7 @@ fn propagate_chain_reactions(
     knockouts: &mut Vec<KnockoutEvent>,
     current_time: f32,
     min_dist: f32,
+    court: &CourtPhysics,
 ) {
     let mut active_movers = vec![initial_victim_idx];
     let len = existing_coins.len();
@@ -143,8 +156,8 @@ fn propagate_chain_reactions(
                 let old_target_y = existing_coins[target_idx].y;
                 let was_on = existing_coins[target_idx].is_on_line;
 
-                existing_coins[target_idx].x = (old_target_x + nx * push_amount).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                existing_coins[target_idx].y = (old_target_y + ny * push_amount).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+                existing_coins[target_idx].x = (old_target_x + nx * push_amount).clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+                existing_coins[target_idx].y = (old_target_y + ny * push_amount).clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
 
                 let new_dist = (existing_coins[target_idx].y - TARGET_LINE_Y).abs();
                 let new_is_on = new_dist <= COIN_RADIUS;
@@ -191,6 +204,7 @@ fn check_and_apply_collision(
     existing_coins: &mut [SettledCoin],
     knockouts: &mut Vec<KnockoutEvent>,
     sound_cue: &mut String,
+    court: &CourtPhysics,
 ) -> bool {
     let min_dist = COIN_RADIUS * 2.05;
     let mut any_hit = false;
@@ -219,8 +233,8 @@ fn check_and_apply_collision(
 
             // Momentum transfer: strong visible push for victim
             let push_dist = (overlap * 0.60 + 0.10 + *slide_speed * 0.16).clamp(0.12, 0.42);
-            let target_x = (old_x + nx * push_dist).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-            let target_y = (old_y + ny * push_dist).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+            let target_x = (old_x + nx * push_dist).clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+            let target_y = (old_y + ny * push_dist).clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
 
             existing_coins[i].x = target_x;
             existing_coins[i].y = target_y;
@@ -261,7 +275,7 @@ fn check_and_apply_collision(
             }
 
             // Propagate chain collisions strictly from this displaced victim to other coins it strikes
-            propagate_chain_reactions(i, existing_coins, knockouts, current_time + 0.04, min_dist);
+            propagate_chain_reactions(i, existing_coins, knockouts, current_time + 0.04, min_dist, court);
         }
     }
     any_hit
@@ -292,8 +306,14 @@ pub fn simulate_throw(
     let elev_rad = elevation_deg.clamp(18.0, 55.0).to_radians();
     let p = power.clamp(0.05, 1.0);
 
-    // Speed curve calibrated so ~0.50 power lands near the center line (3.75m)
-    let speed = 4.2 + (p * 4.4);
+    // Speed curve calibrated per court:
+    // "piso_pared": low base speed allows gentle soft tosses (2.4 m/s) to direct raya hits (4.08 m/s)
+    // and wall-rebound carambolas (5.5-7.2 m/s).
+    // "cajon_barro": damp clay absorbs forward energy; soft toss (4.4 m/s) to direct raya hits (6.25 m/s).
+    let speed = match court_theme {
+        "piso_pared" => 2.4 + (p * 4.8),
+        _ => 4.2 + (p * 4.4),
+    };
 
     // Initial velocity vectors
     let v_forward = speed * elev_rad.cos();
@@ -313,27 +333,7 @@ pub fn simulate_throw(
     };
 
     let mut trajectory = Vec::new();
-
-    // Sample initial flight arc (24 points)
     let sample_count_1 = 22;
-    for i in 0..sample_count_1 {
-        let frac = (i as f32) / (sample_count_1 as f32);
-        let t = frac * flight_time_1;
-        let x = vx * t + (spin * 0.03 * t * t);
-        let y = vy * t;
-        let z = (RELEASE_HEIGHT_Z + vz0 * t - 0.5 * GRAVITY * t * t).max(0.0);
-        trajectory.push(TrajectoryPoint { x, y, z, t, is_bounce: false });
-    }
-
-    // Impact 1 coordinate
-    let impact1_x = vx * flight_time_1 + (spin * 0.03 * flight_time_1 * flight_time_1);
-    let impact1_y = vy * flight_time_1;
-    let mut current_time = flight_time_1;
-
-    // Check if impact is inside or near court bounds
-    let in_court_x = impact1_x >= (BOX_MIN_X - 0.15) && impact1_x <= (BOX_MAX_X + 0.15);
-    let in_court_y = impact1_y >= (BOX_MIN_Y - 0.20) && impact1_y <= (BOX_MAX_Y + 0.35);
-
     let mut knockouts = Vec::new();
     let mut sound_cue = if court_theme == "piso_pared" {
         "bounce_tile".to_string()
@@ -341,6 +341,54 @@ pub fn simulate_throw(
         "thud_clay".to_string()
     };
     let mut was_clavada = false;
+    let mut stage1_hit = false;
+    let mut impact1_x = vx * flight_time_1 + (spin * 0.03 * flight_time_1 * flight_time_1);
+    let mut impact1_y = vy * flight_time_1;
+    let mut current_time = flight_time_1;
+
+    // Sample initial flight arc (22 points)
+    for i in 0..sample_count_1 {
+        let frac = (i as f32) / (sample_count_1 as f32);
+        let t = frac * flight_time_1;
+        let x = vx * t + (spin * 0.03 * t * t);
+        let y = vy * t;
+        let z = (RELEASE_HEIGHT_Z + vz0 * t - 0.5 * GRAVITY * t * t).max(0.0);
+        trajectory.push(TrajectoryPoint { x, y, z, t, is_bounce: false });
+
+        // If descending within 8.5cm of the ground, check for direct air collision with settled coins
+        if !stage1_hit && frac > 0.45 && z <= 0.085 {
+            let mut test_x = x;
+            let mut test_y = y;
+            let mut test_dir_x = if vx.abs() > 0.001 { vx / vx.abs() } else { 0.0 };
+            let mut test_dir_y = if vy.abs() > 0.001 { vy / vy.abs() } else { 1.0 };
+            let mut test_spd = (vx * vx + vy * vy).sqrt();
+            let hit = check_and_apply_collision(
+                &mut test_x,
+                &mut test_y,
+                &mut test_dir_x,
+                &mut test_dir_y,
+                &mut test_spd,
+                t,
+                existing_coins,
+                &mut knockouts,
+                &mut sound_cue,
+                &court,
+            );
+            if hit {
+                stage1_hit = true;
+                impact1_x = test_x;
+                impact1_y = test_y;
+                current_time = t;
+                vx = test_dir_x * test_spd * 0.65;
+                vy = test_dir_y * test_spd * 0.65;
+                break;
+            }
+        }
+    }
+
+    // Check if impact is inside or near court bounds
+    let in_court_x = impact1_x >= (court.min_x - 0.25) && impact1_x <= (court.max_x + 0.25);
+    let in_court_y = impact1_y >= (court.min_y - 0.35) && impact1_y <= (court.max_y + 0.40);
 
     // Mark impact 1 in trajectory
     trajectory.push(TrajectoryPoint {
@@ -354,21 +402,21 @@ pub fn simulate_throw(
     let (final_x, final_y, status) = if in_court_x && in_court_y {
         // Check for Clavada on damp clay only (if not landing directly on another coin)
         let clavada_candidate = court_theme == "cajon_barro" && elevation_deg > 38.0 && p > 0.45 && p < 0.75 && rng.random_range(0..100) < 6;
-        let candidate_x = impact1_x.clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-        let candidate_y = impact1_y.clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+        let candidate_x = impact1_x.clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+        let candidate_y = impact1_y.clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
         let hits_settled = existing_coins.iter().any(|c| {
             (c.status == CoinStatus::InBox || c.status == CoinStatus::Clavada)
                 && ((c.x - candidate_x).powi(2) + (c.y - candidate_y).powi(2)).sqrt() < (COIN_RADIUS * 2.05)
         });
 
-        if clavada_candidate && !hits_settled {
+        if clavada_candidate && !hits_settled && !stage1_hit {
             was_clavada = true;
             sound_cue = "clavada".to_string();
             (candidate_x, candidate_y, CoinStatus::Clavada)
         } else {
             // 2. Multi-Bounce Arc: Rebound velocity on impact 1
-            let vz_impact = (vz0 - GRAVITY * flight_time_1).abs();
-            let vz_bounce = vz_impact * court.restitution;
+            let vz_impact = if stage1_hit { 0.20 } else { (vz0 - GRAVITY * flight_time_1).abs() };
+            let mut vz_bounce = vz_impact * court.restitution;
 
             let mut cur_x = impact1_x;
             let mut cur_y = impact1_y;
@@ -377,8 +425,33 @@ pub fn simulate_throw(
             vy *= (1.0 - (court.friction * 0.78)).max(0.08);
             vx *= 0.60;
 
+            let mut slide_speed = (vx * vx + vy * vy).sqrt();
+            let mut slide_dir_x = if slide_speed > 0.001 { vx / slide_speed } else { 0.0 };
+            let mut slide_dir_y = if slide_speed > 0.001 { vy / slide_speed } else { 1.0 };
+
+            // Check if coin landed directly on an existing coin at impact 1
+            if !stage1_hit {
+                let hit_at_impact = check_and_apply_collision(
+                    &mut cur_x,
+                    &mut cur_y,
+                    &mut slide_dir_x,
+                    &mut slide_dir_y,
+                    &mut slide_speed,
+                    current_time,
+                    existing_coins,
+                    &mut knockouts,
+                    &mut sound_cue,
+                    &court,
+                );
+                if hit_at_impact {
+                    vz_bounce *= 0.35;
+                    vx = slide_dir_x * slide_speed;
+                    vy = slide_dir_y * slide_speed;
+                }
+            }
+
             // If bounce height is significant (> 1.5 cm on tile/patio), simulate hop in air
-            if vz_bounce > 0.40 {
+            if vz_bounce > 0.35 {
                 let bounce_dur = (2.0 * vz_bounce) / GRAVITY;
                 let bounce_samples = 10;
 
@@ -396,8 +469,8 @@ pub fn simulate_throw(
                         is_bounce: j == bounce_samples,
                     });
 
-                    // Check for low-altitude skim collision (< 4cm above ground)
-                    if z <= 0.045 {
+                    // Check for collision at any point during bounce hop (< 9cm above ground)
+                    if z <= 0.09 {
                         let mut test_x = x;
                         let mut test_y = y;
                         let mut test_dir_x = if vx.abs() > 0.001 { vx / vx.abs() } else { 0.0 };
@@ -413,6 +486,7 @@ pub fn simulate_throw(
                             existing_coins,
                             &mut knockouts,
                             &mut sound_cue,
+                            &court,
                         );
                         if hit {
                             vx = test_dir_x * test_spd;
@@ -433,9 +507,9 @@ pub fn simulate_throw(
             }
 
             // 3. Ground Roll & Slide Phase (decelerating across surface)
-            let mut slide_speed = (vx * vx + vy * vy).sqrt();
-            let mut slide_dir_x = if slide_speed > 0.001 { vx / slide_speed } else { 0.0 };
-            let mut slide_dir_y = if slide_speed > 0.001 { vy / slide_speed } else { 1.0 };
+            slide_speed = (vx * vx + vy * vy).sqrt();
+            slide_dir_x = if slide_speed > 0.001 { vx / slide_speed } else { 0.0 };
+            slide_dir_y = if slide_speed > 0.001 { vy / slide_speed } else { 1.0 };
 
             // Check if coin landed directly on an existing coin
             check_and_apply_collision(
@@ -448,6 +522,7 @@ pub fn simulate_throw(
                 existing_coins,
                 &mut knockouts,
                 &mut sound_cue,
+                &court,
             );
 
             let slide_dt = 0.035;
@@ -466,8 +541,8 @@ pub fn simulate_throw(
                     cur_y += slide_dir_y * slide_speed * sub_dt;
 
                     // Back-wall carambola rebound on Piso & Pared
-                    if court.has_back_wall && cur_y >= (BOX_MAX_Y - 0.02) {
-                        cur_y = BOX_MAX_Y - 0.02;
+                    if court.has_back_wall && cur_y >= (court.max_y - 0.02) {
+                        cur_y = court.max_y - 0.02;
                         slide_dir_y = -slide_dir_y.abs(); // Rebound backwards toward line!
                         slide_speed *= 0.70;
                         sound_cue = "wall_bounce".to_string();
@@ -491,6 +566,7 @@ pub fn simulate_throw(
                         existing_coins,
                         &mut knockouts,
                         &mut sound_cue,
+                        &court,
                     );
                     if collided {
                         trajectory.push(TrajectoryPoint {
@@ -515,8 +591,8 @@ pub fn simulate_throw(
                 });
             }
 
-            let mut settled_x = cur_x.clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-            let mut settled_y = cur_y.clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+            let mut settled_x = cur_x.clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+            let mut settled_y = cur_y.clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
 
             // 4. Final Settling Separation: Guarantee NO two coins can ever sit overlapping on the board!
             let min_allowed = COIN_RADIUS * 2.05;
@@ -547,11 +623,11 @@ pub fn simulate_throw(
                         let old_y = existing_coins[i].y;
                         let was_on = existing_coins[i].is_on_line;
 
-                        existing_coins[i].x = (old_x + nx * push_amount).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                        existing_coins[i].y = (old_y + ny * push_amount).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+                        existing_coins[i].x = (old_x + nx * push_amount).clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+                        existing_coins[i].y = (old_y + ny * push_amount).clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
 
-                        settled_x = (settled_x - nx * (overlap * 0.50)).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                        settled_y = (settled_y - ny * (overlap * 0.50)).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+                        settled_x = (settled_x - nx * (overlap * 0.50)).clamp(court.min_x + COIN_RADIUS, court.max_x - COIN_RADIUS);
+                        settled_y = (settled_y - ny * (overlap * 0.50)).clamp(court.min_y + COIN_RADIUS, court.max_y - COIN_RADIUS);
 
                         let new_dist = (existing_coins[i].y - TARGET_LINE_Y).abs();
                         let new_is_on = new_dist <= COIN_RADIUS;
@@ -584,7 +660,7 @@ pub fn simulate_throw(
                         }
 
                         // Chain reactions ONLY propagate from this directly contacted coin i
-                        propagate_chain_reactions(i, existing_coins, &mut knockouts, coll_time, min_allowed);
+                        propagate_chain_reactions(i, existing_coins, &mut knockouts, coll_time, min_allowed, &court);
                     }
                 }
                 if !had_overlap {
@@ -686,11 +762,11 @@ pub fn calculate_bot_throw(
 ) -> (f32, f32, f32, f32) {
     let mut rng = rand::rng();
 
-    // Calibration: on bouncy tile, slightly less power because of bounce/slide forward
-    let ideal_elevation = 28.0;
+    // Calibration: on bouncy tile, less power needed to reach the raya because of smooth slide
+    let ideal_elevation = 27.0;
     let ideal_power = match court_theme {
-        "piso_pared" => 0.42,
-        _ => 0.465, // cajon_barro clay
+        "piso_pared" => 0.35, // Direct shot to the raya on polished tile
+        _ => 0.52,            // cajon_barro damp clay
     };
 
     // Lateral angle to hit target_x from (0,0)
@@ -1157,5 +1233,58 @@ mod tests {
         // Bystander coordinates must remain 100% untouched
         assert_eq!(coins[2].x, bystander_x);
         assert_eq!(coins[2].y, bystander_y);
+    }
+
+    #[test]
+    fn test_piso_pared_hits_midcourt_coin() {
+        let mut coins = vec![
+            // A settled coin sitting in mid-court (Y = 3.0m) as shown in user's screenshot
+            SettledCoin {
+                id: "coin_test".to_string(),
+                player_id: "p1".to_string(),
+                player_name: "test".to_string(),
+                color: "#ec4899".to_string(),
+                avatar: "🧔".to_string(),
+                coin_skin: "centenario".to_string(),
+                throw_number: 1,
+                x: 0.0,
+                y: 3.0,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: false,
+                dist_to_line_m: 0.75,
+                dist_to_line_mm: 750.0,
+                display_distance: "75.0 cm".to_string(),
+            },
+        ];
+
+        let orig_y = coins[0].y;
+
+        // Player throws towards Y = 3.0m on piso_pared
+        let res = simulate_throw(
+            "coin_thrower",
+            "p2",
+            "Player 2",
+            "#f59e0b",
+            "🤠",
+            "centenario",
+            "piso_pared",
+            1,
+            0.0,
+            0.35,
+            26.0,
+            0.0,
+            &mut coins,
+        );
+
+        println!("res.coin.x = {}, res.coin.y = {}, status = {:?}", res.coin.x, res.coin.y, res.coin.status);
+
+        let victims: Vec<&str> = res.knockouts.iter().map(|k| k.victim_coin_id.as_str()).collect();
+        assert!(
+            victims.contains(&"coin_test"),
+            "Throw must hit midcourt coin on piso_pared! Knockouts: {:?}",
+            victims
+        );
+        assert_ne!(coins[0].y, orig_y, "Target coin must be displaced by collision!");
     }
 }
