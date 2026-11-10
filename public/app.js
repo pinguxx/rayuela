@@ -59,7 +59,7 @@
     let elScoreboardTable, elTurnTimer, elActiveThrowerName;
     let elPowerFill, elAngleValue, elPowerValue, elFlickInstruction;
     let elModalFotoFinish, elVerdictBanner, elAwardsList, elBtnNextRound;
-    let elModalVictory, elVictoryPodium, elVictoryStats, elBtnPlayAgain, elBtnDownloadTrophy;
+    let elModalVictory, elVictoryPodium, elVictoryStats, elVictorySpecialAwards, elBtnPlayAgain, elBtnDownloadTrophy, elBtnVictoryHome;
     let elModalQr, elQrContainer, elShareUrlText, elBtnCopyUrl;
     let elBanterBubble, elToastContainer;
 
@@ -138,8 +138,10 @@
         elModalVictory = document.getElementById('modal-victory');
         elVictoryPodium = document.getElementById('victory-podium');
         elVictoryStats = document.getElementById('victory-stats');
+        elVictorySpecialAwards = document.getElementById('victory-special-awards');
         elBtnPlayAgain = document.getElementById('btn-play-again');
         elBtnDownloadTrophy = document.getElementById('btn-download-trophy');
+        elBtnVictoryHome = document.getElementById('btn-victory-home');
 
         elModalQr = document.getElementById('modal-qr');
         elQrContainer = document.getElementById('qr-code-target');
@@ -255,6 +257,22 @@
         });
 
         elBtnDownloadTrophy.addEventListener('click', downloadVictoryTrophy);
+
+        if (elBtnVictoryHome) {
+            elBtnVictoryHome.addEventListener('click', () => {
+                elModalVictory.classList.remove('active');
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                currentRoom = null;
+                activeFlightAnimation = null;
+                pendingLaunch = null;
+                activeCarambolaBanner = null;
+                switchScreen(elScreenLobby);
+                showToast("Regresaste al menú principal");
+            });
+        }
 
         // Leave waiting room button
         const btnLeaveWaiting = document.getElementById('btn-leave-waiting');
@@ -845,23 +863,218 @@
 
         const sorted = [...room.players].sort((a, b) => b.score - a.score);
         const winner = sorted[0];
+        const runnerUp = sorted.length >= 2 ? sorted[1] : null;
+        const thirdPlace = sorted.length >= 3 ? sorted[2] : null;
 
-        elVictoryPodium.innerHTML = `
-            <div style="font-size:48px;margin-bottom:8px;">🏆</div>
-            <h3 style="color:${winner.color};font-size:26px;font-family:var(--font-display);">${escapeHtml(winner.name)}</h3>
-            <p style="color:#fcd34d;font-size:15px;margin-top:4px;">¡Campeón de la Cantina con ${winner.score} puntos!</p>
-        `;
+        // 1. Build Visual Podium (1st, 2nd, and 3rd place)
+        let podiumHtml = '';
+        if (sorted.length === 2 && runnerUp) {
+            // 2-player direct showdown podium
+            podiumHtml = `
+                <div class="podium-step rank-1" style="flex:1.2;">
+                    <div class="podium-medal">🥇</div>
+                    <div class="podium-avatar-wrap" style="border-color:${winner.color};">
+                        <span class="podium-crown">👑</span>
+                        <span>${winner.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${winner.color};">${escapeHtml(winner.name)}</div>
+                    <div class="podium-points">${winner.score} pts</div>
+                    <div class="podium-badge">🏆 Gran Campeón</div>
+                </div>
+                <div class="podium-step rank-2" style="flex:1;">
+                    <div class="podium-medal">🥈</div>
+                    <div class="podium-avatar-wrap" style="border-color:${runnerUp.color};">
+                        <span>${runnerUp.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${runnerUp.color};">${escapeHtml(runnerUp.name)}</div>
+                    <div class="podium-points">${runnerUp.score} pts</div>
+                    <div class="podium-badge" style="color:#94a3b8;">🥈 Subcampeón</div>
+                </div>
+            `;
+        } else if (sorted.length >= 3 && runnerUp && thirdPlace) {
+            // 3+ players Olympic-style podium (2nd on left, 1st center, 3rd right)
+            podiumHtml = `
+                <div class="podium-step rank-2">
+                    <div class="podium-medal">🥈</div>
+                    <div class="podium-avatar-wrap" style="border-color:${runnerUp.color};">
+                        <span>${runnerUp.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${runnerUp.color};">${escapeHtml(runnerUp.name)}</div>
+                    <div class="podium-points">${runnerUp.score} pts</div>
+                    <div class="podium-badge" style="color:#94a3b8;">🥈 Subcampeón</div>
+                </div>
+                <div class="podium-step rank-1">
+                    <div class="podium-medal">🥇</div>
+                    <div class="podium-avatar-wrap" style="border-color:${winner.color};">
+                        <span class="podium-crown">👑</span>
+                        <span>${winner.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${winner.color};">${escapeHtml(winner.name)}</div>
+                    <div class="podium-points">${winner.score} pts</div>
+                    <div class="podium-badge">🏆 Gran Campeón</div>
+                </div>
+                <div class="podium-step rank-3">
+                    <div class="podium-medal">🥉</div>
+                    <div class="podium-avatar-wrap" style="border-color:${thirdPlace.color};">
+                        <span>${thirdPlace.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${thirdPlace.color};">${escapeHtml(thirdPlace.name)}</div>
+                    <div class="podium-points">${thirdPlace.score} pts</div>
+                    <div class="podium-badge" style="color:#d97706;">🥉 3er Lugar</div>
+                </div>
+            `;
+        } else {
+            // Solo / single player
+            podiumHtml = `
+                <div class="podium-step rank-1" style="max-width:200px;">
+                    <div class="podium-medal">🥇</div>
+                    <div class="podium-avatar-wrap" style="border-color:${winner.color};">
+                        <span class="podium-crown">👑</span>
+                        <span>${winner.avatar}</span>
+                    </div>
+                    <div class="podium-name" style="color:${winner.color};">${escapeHtml(winner.name)}</div>
+                    <div class="podium-points">${winner.score} pts</div>
+                    <div class="podium-badge">🏆 Campeón</div>
+                </div>
+            `;
+        }
+        elVictoryPodium.innerHTML = podiumHtml;
+
+        // 2. Compute Special Awards (Premios Especiales & Distinciones de Cantina)
+        const awards = [];
+
+        // Award 1: La Raya de Oro (El Ojo de Águila) - Most rayadas or closest distance
+        const bestRayador = [...room.players].sort((a, b) => {
+            if (b.rayadas !== a.rayadas) return b.rayadas - a.rayadas;
+            return a.best_distance_mm - b.best_distance_mm;
+        })[0];
+        if (bestRayador) {
+            awards.push({
+                icon: '🎯',
+                title: 'La Raya de Oro (Ojo de Águila)',
+                recipient: bestRayador,
+                desc: bestRayador.rayadas > 0
+                    ? `Encajó ${bestRayador.rayadas} moneda(s) exactamente en la raya.`
+                    : `Tiro más certero a solo ${formatDistDisplay(bestRayador.best_distance_mm)}.`
+            });
+        }
+
+        // Award 2: El Toro de la Cantina (Carambolas & Knockouts)
+        const bestBrawler = [...room.players].sort((a, b) => b.knockouts - a.knockouts)[0];
+        if (bestBrawler && bestBrawler.knockouts > 0) {
+            awards.push({
+                icon: '💥',
+                title: 'El Toro de la Cantina',
+                recipient: bestBrawler,
+                desc: `Expulsó ${bestBrawler.knockouts} moneda(s) rivales con carambolas limpias.`
+            });
+        } else {
+            awards.push({
+                icon: '🕊️',
+                title: 'Tiro de Seda (Juego Limpio)',
+                recipient: winner,
+                desc: 'Victoria con maestría y sin desplazar monedas contrarias.'
+            });
+        }
+
+        // Award 3: Clavada Magistral / Carambola de Pared
+        const isClay = (room.settings && room.settings.court_theme) !== 'piso_pared';
+        if (isClay) {
+            const bestClavador = [...room.players].sort((a, b) => b.clavadas - a.clavadas)[0];
+            if (bestClavador && bestClavador.clavadas > 0) {
+                awards.push({
+                    icon: '⭐',
+                    title: 'Clavada Magistral',
+                    recipient: bestClavador,
+                    desc: `Clavó ${bestClavador.clavadas} moneda(s) en vertical en el barro húmedo.`
+                });
+            } else {
+                awards.push({
+                    icon: '🏺',
+                    title: 'Señor del Barro',
+                    recipient: runnerUp || winner,
+                    desc: 'Excelente control del deslizamiento en arcilla pesada.'
+                });
+            }
+        } else {
+            awards.push({
+                icon: '⚡',
+                title: 'Maestro de la Carambola',
+                recipient: runnerUp || winner,
+                desc: 'Especialista en rebotes de precisión en la pared de madera.'
+            });
+        }
+
+        // Award 4: La Botana y la Ronda (Humor mexicano de cantina para el último lugar)
+        if (sorted.length >= 2) {
+            const lastPlacePlayer = sorted[sorted.length - 1];
+            awards.push({
+                icon: '🍺',
+                title: 'Paga la Ronda y la Botana',
+                recipient: lastPlacePlayer,
+                desc: '¡Tradición de cantina! Al último lugar le tocan los tacos y las frías 🌮🍻.'
+            });
+        }
+
+        if (elVictorySpecialAwards) {
+            elVictorySpecialAwards.innerHTML = awards.map(a => `
+                <div class="special-award-card">
+                    <div class="special-award-icon">${a.icon}</div>
+                    <div class="special-award-content">
+                        <div class="special-award-name">${a.title}</div>
+                        <div class="special-award-recipient">
+                            <span style="font-size:16px;">${a.recipient.avatar}</span>
+                            <span style="color:${a.recipient.color};">${escapeHtml(a.recipient.name)}</span>
+                        </div>
+                        <div class="special-award-desc">${a.desc}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 3. Full Standings Table
+        const standingsRows = sorted.map((p, idx) => {
+            const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}°`;
+            const isMe = p.id === myPlayerId;
+            return `
+                <div class="standings-row ${idx === 0 ? 'is-winner' : ''}" style="${isMe ? 'background:rgba(245,158,11,0.12);border-left:3px solid var(--gold-centenario);' : ''}">
+                    <div class="standings-rank">${medal}</div>
+                    <div class="standings-avatar">${p.avatar}</div>
+                    <div class="standings-name" style="color:${p.color};font-weight:${isMe ? '800' : '600'};">
+                        ${escapeHtml(p.name)} ${isMe ? '<span style="font-size:10px;color:var(--gold-centenario);">(Tú)</span>' : ''} ${p.is_bot ? '🤖' : ''}
+                    </div>
+                    <div class="standings-stats">
+                        <span>🎯 ${p.rayadas}</span>
+                        <span>💥 ${p.knockouts}</span>
+                        <span>📏 ${formatDistDisplay(p.best_distance_mm)}</span>
+                    </div>
+                    <div class="standings-score">${p.score} pts</div>
+                </div>
+            `;
+        }).join('');
 
         elVictoryStats.innerHTML = `
-            <div style="background:#100703;padding:14px;border-radius:8px;margin-top:14px;text-align:left;font-size:13px;line-height:1.7;border:1px solid #78350f;">
-                <div>🎯 <strong>Rayadas en la línea:</strong> ${winner.rayadas}</div>
-                <div>⭐ <strong>Clavadas de barro:</strong> ${winner.clavadas}</div>
-                <div>💥 <strong>Carambolas y Knockouts:</strong> ${winner.knockouts}</div>
-                <div>📏 <strong>Tiro más certero:</strong> ${formatDistDisplay(winner.best_distance_mm)}</div>
+            <div class="standings-table-container">
+                ${standingsRows}
             </div>
         `;
 
-        elBtnPlayAgain.style.display = (room.host_id === myPlayerId) ? 'block' : 'none';
+        // 4. Buttons configuration
+        const isHost = room.host_id === myPlayerId || room.players.every(p => p.is_bot || p.id === myPlayerId);
+        if (elBtnPlayAgain) {
+            elBtnPlayAgain.style.display = 'flex';
+            if (isHost) {
+                elBtnPlayAgain.disabled = false;
+                elBtnPlayAgain.innerHTML = '🔄 Jugar Revancha';
+                elBtnPlayAgain.style.opacity = '1';
+                elBtnPlayAgain.style.cursor = 'pointer';
+            } else {
+                elBtnPlayAgain.disabled = true;
+                elBtnPlayAgain.innerHTML = '⏳ Esperando al Anfitrión...';
+                elBtnPlayAgain.style.opacity = '0.7';
+                elBtnPlayAgain.style.cursor = 'not-allowed';
+            }
+        }
 
         setTimeout(() => {
             elModalVictory.classList.add('active');
@@ -1959,30 +2172,38 @@
         tCtx.fillText(winner.name, 400, 420);
 
         tCtx.fillStyle = '#fbbf24';
-        tCtx.font = '28px sans-serif';
-        tCtx.fillText(`¡Gran Campeón con ${winner.score} Puntos!`, 400, 470);
+        tCtx.font = 'bold 26px sans-serif';
+        tCtx.fillText(`¡Gran Campeón con ${winner.score} Puntos!`, 400, 465);
+
+        if (sorted.length >= 2) {
+            tCtx.fillStyle = '#94a3b8';
+            tCtx.font = '19px sans-serif';
+            tCtx.fillText(`🥈 Subcampeón: ${sorted[1].name} (${sorted[1].score} pts)`, 400, 498);
+        }
 
         // Telemetry stats
-        tCtx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        tCtx.fillRect(100, 520, 600, 260);
+        tCtx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        tCtx.fillRect(100, 530, 600, 240);
         tCtx.strokeStyle = '#78350f';
         tCtx.lineWidth = 3;
-        tCtx.strokeRect(100, 520, 600, 260);
+        tCtx.strokeRect(100, 530, 600, 240);
 
         tCtx.fillStyle = '#e2e8f0';
-        tCtx.font = '22px sans-serif';
+        tCtx.font = '20px sans-serif';
         tCtx.textAlign = 'left';
         tCtx.fillText(`🎯 Rayadas en la Mera Raya: ${winner.rayadas}`, 140, 580);
-        tCtx.fillText(`⭐ Clavadas en el Barro: ${winner.clavadas}`, 140, 630);
-        tCtx.fillText(`💥 Knockouts & Carambolas: ${winner.knockouts}`, 140, 680);
-        tCtx.fillText(`📏 Mejor Tiro: ${formatDistDisplay(winner.best_distance_mm)}`, 140, 730);
+        tCtx.fillText(`⭐ Clavadas en el Barro: ${winner.clavadas}`, 140, 625);
+        tCtx.fillText(`💥 Knockouts & Carambolas: ${winner.knockouts}`, 140, 670);
+        tCtx.fillText(`📏 Mejor Tiro: ${formatDistDisplay(winner.best_distance_mm)}`, 140, 715);
 
         // Footer
         tCtx.textAlign = 'center';
         tCtx.fillStyle = '#a8a29e';
+        tCtx.font = '15px sans-serif';
+        tCtx.fillText(`Sala: ${currentRoom.room_code} | Meta: ${currentRoom.settings.target_points} Puntos | ${new Date().toLocaleDateString()}`, 400, 830);
+        tCtx.fillStyle = '#fcd34d';
         tCtx.font = '16px sans-serif';
-        tCtx.fillText(`Sala: ${currentRoom.room_code} | Meta: ${currentRoom.settings.target_points} Puntos | ${new Date().toLocaleDateString()}`, 400, 840);
-        tCtx.fillText('El que pierde paga la ronda 🍺 ¡Salud!', 400, 880);
+        tCtx.fillText(`🍺 La botana y la ronda le tocan a: ${sorted[sorted.length - 1].name} 🌮 ¡Salud!`, 400, 868);
 
         // Download trigger
         const link = document.createElement('a');

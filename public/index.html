@@ -317,16 +317,34 @@
 
   <!-- MODAL 2: VICTORIA Y PODIO -->
   <div id="modal-victory" class="modal-overlay">
-    <div class="modal-card">
-      <div id="victory-podium"></div>
+    <div class="modal-card victory-modal-card">
+      <div class="victory-header">
+        <div class="victory-title-badge">🏆 FIN DE LA PARTIDA 🏆</div>
+        <h2>Pabellón de Campeones</h2>
+        <p class="victory-subtitle">El dictamen final de la mesa de cantina</p>
+      </div>
+
+      <!-- Podium of 1st, 2nd, 3rd -->
+      <div id="victory-podium" class="victory-podium-container"></div>
+
+      <!-- Other Prizes & Accolades -->
+      <div class="victory-section-title">🎖️ Premios y Distinciones de la Cantina</div>
+      <div id="victory-special-awards" class="victory-awards-grid"></div>
+
+      <!-- Full Standings Table -->
+      <div class="victory-section-title">📋 Marcador Final de la Mesa</div>
       <div id="victory-stats"></div>
 
-      <div style="display:flex;gap:10px;margin-top:20px;">
-        <button id="btn-download-trophy" class="btn-secondary" style="flex:1;">
+      <!-- Action Buttons -->
+      <div class="victory-actions">
+        <button id="btn-victory-home" class="btn-secondary victory-btn btn-victory-home">
+          🏠 Menú Principal
+        </button>
+        <button id="btn-download-trophy" class="btn-secondary victory-btn">
           🖼️ Guardar Trofeo
         </button>
-        <button id="btn-play-again" class="btn-primary" style="flex:1;">
-          🔄 Jugar de Nuevo
+        <button id="btn-play-again" class="btn-primary victory-btn">
+          🔄 Jugar Revancha
         </button>
       </div>
     </div>
