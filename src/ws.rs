@@ -335,21 +335,25 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             if room.host_id == *pid && room.phase == GamePhase::Lobby && room.players.len() < 8 {
-                                let profile = if let Some(ref bp) = bot_profile_name {
-                                    BOT_PROFILES.iter().find(|(name, _, _, _)| name == bp)
+                                let existing_names: Vec<&str> = room.players.iter().map(|p| p.name.as_str()).collect();
+                                let available_profiles: Vec<&(&str, &str, f32, &str)> = BOT_PROFILES
+                                    .iter()
+                                    .filter(|(name, _, _, _)| !existing_names.iter().any(|en| en.contains(name)))
+                                    .collect();
+
+                                let chosen_profile = if let Some(ref bp) = bot_profile_name {
+                                    BOT_PROFILES.iter().find(|(name, _, _, _)| name == bp).copied()
+                                } else if !available_profiles.is_empty() {
+                                    let mut rng = rand::rng();
+                                    let idx = rng.random_range(0..available_profiles.len());
+                                    Some(*available_profiles[idx])
                                 } else {
-                                    None
+                                    let mut rng = rand::rng();
+                                    let idx = rng.random_range(0..BOT_PROFILES.len());
+                                    Some(BOT_PROFILES[idx])
                                 };
 
-                                let (b_name, b_avatar, _b_var, b_color) = profile
-                                    .copied()
-                                    .unwrap_or_else(|| {
-                                        let idx = {
-                                            let mut rng = rand::rng();
-                                            rng.random_range(0..BOT_PROFILES.len())
-                                        };
-                                        BOT_PROFILES[idx]
-                                    });
+                                let (b_name, b_avatar, _b_var, b_color) = chosen_profile.unwrap_or(BOT_PROFILES[0]);
 
                                 let used_colors: Vec<String> = room.players.iter().map(|p| p.color.clone()).collect();
                                 let bot_color = if !used_colors.iter().any(|c| c.eq_ignore_ascii_case(b_color)) {

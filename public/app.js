@@ -71,9 +71,20 @@
         setupAudio();
         checkUrlForRoomCode();
 
-        // Restore player preferences from localStorage
+        // Restore player preferences from localStorage (do not default to 'Jugador 1')
         const savedName = localStorage.getItem('rayuela_player_name');
-        if (savedName) elPlayerName.value = savedName;
+        if (savedName && savedName.trim() !== 'Jugador 1' && savedName.trim() !== 'Jugador') {
+            elPlayerName.value = savedName.trim();
+        } else {
+            elPlayerName.value = '';
+            localStorage.removeItem('rayuela_player_name');
+        }
+
+        elPlayerName.addEventListener('input', () => {
+            if (elPlayerName.value.trim()) {
+                elPlayerName.classList.remove('input-error');
+            }
+        });
 
         const savedAvatar = localStorage.getItem('rayuela_avatar');
         if (savedAvatar && AVATARS.includes(savedAvatar)) selectedAvatar = savedAvatar;
@@ -154,12 +165,19 @@
 
     function initLobbyControls() {
         elBtnCreateRoom.addEventListener('click', () => {
+            const name = elPlayerName.value.trim();
+            if (!name) {
+                showToast("¡Por favor escribe tu nombre o apodo para jugar!");
+                elPlayerName.classList.add('input-error');
+                elPlayerName.focus();
+                return;
+            }
             audio.resume();
             savePreferences();
             connectWebSocket(() => {
                 sendWsAction({
                     action: 'create_room',
-                    name: elPlayerName.value.trim() || 'Jugador 1',
+                    name: name,
                     avatar: selectedAvatar,
                     color: selectedColor,
                     coin_skin: selectedCoinSkin,
@@ -176,9 +194,17 @@
         });
 
         elBtnJoinRoom.addEventListener('click', () => {
+            const name = elPlayerName.value.trim();
+            if (!name) {
+                showToast("¡Por favor escribe tu nombre o apodo para jugar!");
+                elPlayerName.classList.add('input-error');
+                elPlayerName.focus();
+                return;
+            }
             const code = elRoomCodeInput.value.trim().toUpperCase();
             if (!code) {
                 showToast("Ingresa un código de sala");
+                elRoomCodeInput.focus();
                 return;
             }
             audio.resume();
@@ -187,7 +213,7 @@
                 sendWsAction({
                     action: 'join_room',
                     room_code: code,
-                    name: elPlayerName.value.trim() || 'Jugador',
+                    name: name,
                     avatar: selectedAvatar,
                     color: selectedColor,
                     coin_skin: selectedCoinSkin,
@@ -372,7 +398,12 @@
     }
 
     function savePreferences() {
-        localStorage.setItem('rayuela_player_name', elPlayerName.value.trim());
+        const name = elPlayerName.value.trim();
+        if (name && name !== 'Jugador 1' && name !== 'Jugador') {
+            localStorage.setItem('rayuela_player_name', name);
+        } else {
+            localStorage.removeItem('rayuela_player_name');
+        }
         localStorage.setItem('rayuela_avatar', selectedAvatar);
         localStorage.setItem('rayuela_color', selectedColor);
         localStorage.setItem('rayuela_skin', selectedCoinSkin);
@@ -1512,7 +1543,7 @@
         const COIN_PHYSICAL_RADIUS = 0.055;
         const physicalRadiusPx = COIN_PHYSICAL_RADIUS * (canvasW * lateralFactor) * scale;
         const r = Math.max(11, physicalRadiusPx);
-        const ry = r * 0.52 * tiltY; // Vertical foreshortening + 3D tumbling tilt
+        const ry = r * 0.42 * tiltY; // Calibrated vertical perspective foreshortening + 3D tumbling tilt
 
         const playerColor = coin.color || '#f59e0b';
 

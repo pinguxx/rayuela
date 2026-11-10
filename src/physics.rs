@@ -99,74 +99,84 @@ fn get_court_physics(theme: &str) -> CourtPhysics {
     }
 }
 
-fn propagate_displacements(
+fn propagate_chain_reactions(
+    initial_victim_idx: usize,
     existing_coins: &mut [SettledCoin],
     knockouts: &mut Vec<KnockoutEvent>,
     current_time: f32,
     min_dist: f32,
 ) {
-    for pass in 0..3 {
-        let mut had_push = false;
-        let len = existing_coins.len();
-        for i in 0..len {
-            if existing_coins[i].status != CoinStatus::InBox && existing_coins[i].status != CoinStatus::Clavada {
+    let mut active_movers = vec![initial_victim_idx];
+    let len = existing_coins.len();
+    let mut passes = 0;
+
+    while let Some(source_idx) = active_movers.pop() {
+        passes += 1;
+        if passes > 15 {
+            break; // Guard against infinite cascade loops
+        }
+        let src_x = existing_coins[source_idx].x;
+        let src_y = existing_coins[source_idx].y;
+
+        for target_idx in 0..len {
+            if target_idx == source_idx {
                 continue;
             }
-            for j in (i + 1)..len {
-                if existing_coins[j].status != CoinStatus::InBox && existing_coins[j].status != CoinStatus::Clavada {
-                    continue;
-                }
-                let dx = existing_coins[j].x - existing_coins[i].x;
-                let dy = existing_coins[j].y - existing_coins[i].y;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < min_dist {
-                    had_push = true;
-                    let (nx, ny) = if dist > 0.0001 {
-                        (dx / dist, dy / dist)
-                    } else {
-                        (0.0, 1.0)
-                    };
-                    let push = (min_dist - dist) * 0.55 + 0.04;
-
-                    let old_i_x = existing_coins[i].x;
-                    let old_i_y = existing_coins[i].y;
-                    let old_j_x = existing_coins[j].x;
-                    let old_j_y = existing_coins[j].y;
-
-                    existing_coins[i].x = (old_i_x - nx * push).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                    existing_coins[i].y = (old_i_y - ny * push).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
-                    existing_coins[j].x = (old_j_x + nx * push).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                    existing_coins[j].y = (old_j_y + ny * push).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
-
-                    for k_idx in [i, j] {
-                        let new_dist = (existing_coins[k_idx].y - TARGET_LINE_Y).abs();
-                        let new_is_on = new_dist <= COIN_RADIUS;
-                        existing_coins[k_idx].is_on_line = new_is_on;
-                        existing_coins[k_idx].dist_to_line_m = if new_is_on { 0.0 } else { new_dist - COIN_RADIUS };
-                        existing_coins[k_idx].dist_to_line_mm = existing_coins[k_idx].dist_to_line_m * 1000.0;
-                        existing_coins[k_idx].display_distance = format_distance(existing_coins[k_idx].dist_to_line_mm, new_is_on);
-                    }
-
-                    if !knockouts.iter().any(|k| k.victim_coin_id == existing_coins[j].id && (k.collision_time_s - current_time).abs() < 0.15) {
-                        knockouts.push(KnockoutEvent {
-                            victim_coin_id: existing_coins[j].id.clone(),
-                            victim_player_name: existing_coins[j].player_name.clone(),
-                            collision_time_s: current_time + (pass as f32) * 0.05,
-                            collision_x: old_j_x,
-                            collision_y: old_j_y,
-                            old_x: old_j_x,
-                            old_y: old_j_y,
-                            new_x: existing_coins[j].x,
-                            new_y: existing_coins[j].y,
-                            was_on_line: existing_coins[j].is_on_line,
-                            is_now_on_line: existing_coins[j].is_on_line,
-                        });
-                    }
-                }
+            if existing_coins[target_idx].status != CoinStatus::InBox && existing_coins[target_idx].status != CoinStatus::Clavada {
+                continue;
             }
-        }
-        if !had_push {
-            break;
+
+            let dx = existing_coins[target_idx].x - src_x;
+            let dy = existing_coins[target_idx].y - src_y;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist < min_dist {
+                let (nx, ny) = if dist > 0.0001 {
+                    (dx / dist, dy / dist)
+                } else {
+                    (0.0, 1.0)
+                };
+                let overlap = min_dist - dist;
+                let push_amount = (overlap * 0.65 + 0.07).clamp(0.08, 0.30);
+
+                let old_target_x = existing_coins[target_idx].x;
+                let old_target_y = existing_coins[target_idx].y;
+                let was_on = existing_coins[target_idx].is_on_line;
+
+                existing_coins[target_idx].x = (old_target_x + nx * push_amount).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
+                existing_coins[target_idx].y = (old_target_y + ny * push_amount).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+
+                let new_dist = (existing_coins[target_idx].y - TARGET_LINE_Y).abs();
+                let new_is_on = new_dist <= COIN_RADIUS;
+                existing_coins[target_idx].is_on_line = new_is_on;
+                existing_coins[target_idx].dist_to_line_m = if new_is_on { 0.0 } else { new_dist - COIN_RADIUS };
+                existing_coins[target_idx].dist_to_line_mm = existing_coins[target_idx].dist_to_line_m * 1000.0;
+                existing_coins[target_idx].display_distance = format_distance(existing_coins[target_idx].dist_to_line_mm, new_is_on);
+
+                let coll_time = current_time + (passes as f32) * 0.05;
+                if let Some(existing_k) = knockouts.iter_mut().find(|k| k.victim_coin_id == existing_coins[target_idx].id) {
+                    existing_k.new_x = existing_coins[target_idx].x;
+                    existing_k.new_y = existing_coins[target_idx].y;
+                    existing_k.is_now_on_line = new_is_on;
+                } else {
+                    knockouts.push(KnockoutEvent {
+                        victim_coin_id: existing_coins[target_idx].id.clone(),
+                        victim_player_name: existing_coins[target_idx].player_name.clone(),
+                        collision_time_s: coll_time,
+                        collision_x: src_x,
+                        collision_y: src_y,
+                        old_x: old_target_x,
+                        old_y: old_target_y,
+                        new_x: existing_coins[target_idx].x,
+                        new_y: existing_coins[target_idx].y,
+                        was_on_line: was_on,
+                        is_now_on_line: new_is_on,
+                    });
+                }
+
+                // Chain reaction: pushed coin can push another coin
+                active_movers.push(target_idx);
+            }
         }
     }
 }
@@ -250,8 +260,8 @@ fn check_and_apply_collision(
                 });
             }
 
-            // Propagate chain collisions to any other coins
-            propagate_displacements(existing_coins, knockouts, current_time + 0.04, min_dist);
+            // Propagate chain collisions strictly from this displaced victim to other coins it strikes
+            propagate_chain_reactions(i, existing_coins, knockouts, current_time + 0.04, min_dist);
         }
     }
     any_hit
@@ -385,6 +395,33 @@ pub fn simulate_throw(
                         t: current_time + dt,
                         is_bounce: j == bounce_samples,
                     });
+
+                    // Check for low-altitude skim collision (< 4cm above ground)
+                    if z <= 0.045 {
+                        let mut test_x = x;
+                        let mut test_y = y;
+                        let mut test_dir_x = if vx.abs() > 0.001 { vx / vx.abs() } else { 0.0 };
+                        let mut test_dir_y = if vy.abs() > 0.001 { vy / vy.abs() } else { 1.0 };
+                        let mut test_spd = (vx * vx + vy * vy).sqrt();
+                        let hit = check_and_apply_collision(
+                            &mut test_x,
+                            &mut test_y,
+                            &mut test_dir_x,
+                            &mut test_dir_y,
+                            &mut test_spd,
+                            current_time + dt,
+                            existing_coins,
+                            &mut knockouts,
+                            &mut sound_cue,
+                        );
+                        if hit {
+                            vx = test_dir_x * test_spd;
+                            vy = test_dir_y * test_spd;
+                            cur_x = test_x;
+                            cur_y = test_y;
+                            break;
+                        }
+                    }
                 }
 
                 current_time += bounce_dur;
@@ -504,7 +541,7 @@ pub fn simulate_throw(
                             (0.0, 1.0)
                         };
                         let overlap = min_allowed - dist;
-                        let push_amount = (overlap + 0.07).clamp(0.08, 0.35);
+                        let push_amount = (overlap * 0.55 + 0.04).clamp(0.05, 0.25);
 
                         let old_x = existing_coins[i].x;
                         let old_y = existing_coins[i].y;
@@ -545,9 +582,11 @@ pub fn simulate_throw(
                                 is_now_on_line: new_is_on,
                             });
                         }
+
+                        // Chain reactions ONLY propagate from this directly contacted coin i
+                        propagate_chain_reactions(i, existing_coins, &mut knockouts, coll_time, min_allowed);
                     }
                 }
-                propagate_displacements(existing_coins, &mut knockouts, current_time + 0.05, min_allowed);
                 if !had_overlap {
                     break;
                 }
@@ -960,5 +999,163 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_untouched_coins_do_not_move_between_turns() {
+        let mut coins = vec![
+            SettledCoin {
+                id: "coin_quiet_1".to_string(),
+                player_id: "p1".to_string(),
+                player_name: "Quiet 1".to_string(),
+                color: "#10b981".to_string(),
+                avatar: "🧔".to_string(),
+                coin_skin: "centenario".to_string(),
+                throw_number: 1,
+                x: 0.25,
+                y: 3.75,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+            SettledCoin {
+                id: "coin_quiet_2".to_string(),
+                player_id: "p2".to_string(),
+                player_name: "Quiet 2".to_string(),
+                color: "#ef4444".to_string(),
+                avatar: "🤠".to_string(),
+                coin_skin: "diez_pesos".to_string(),
+                throw_number: 1,
+                x: 0.37,
+                y: 3.75,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+        ];
+
+        let orig_x1 = coins[0].x;
+        let orig_y1 = coins[0].y;
+        let orig_x2 = coins[1].x;
+        let orig_y2 = coins[1].y;
+
+        // Player throws to the FAR LEFT side of the court (x < -0.20)
+        let res = simulate_throw(
+            "coin_thrower",
+            "p3",
+            "Left Thrower",
+            "#f59e0b",
+            "🔥",
+            "centenario",
+            "cajon_barro",
+            1,
+            -15.0,
+            0.52,
+            26.0,
+            0.0,
+            &mut coins,
+        );
+
+        // Neither quiet coin should be in knockouts
+        assert!(res.knockouts.is_empty(), "No knockouts should happen for untouched coins!");
+
+        // Coordinates of untouched coins must be 100% strictly identical (zero drift between turns)
+        assert_eq!(coins[0].x, orig_x1, "Quiet 1 X moved unexpectedly!");
+        assert_eq!(coins[0].y, orig_y1, "Quiet 1 Y moved unexpectedly!");
+        assert_eq!(coins[1].x, orig_x2, "Quiet 2 X moved unexpectedly!");
+        assert_eq!(coins[1].y, orig_y2, "Quiet 2 Y moved unexpectedly!");
+    }
+
+    #[test]
+    fn test_chain_reaction_only_moves_connected_coins() {
+        let mut coins = vec![
+            // Direct victim right in the line of throw
+            SettledCoin {
+                id: "coin_victim_a".to_string(),
+                player_id: "p1".to_string(),
+                player_name: "Victim A".to_string(),
+                color: "#10b981".to_string(),
+                avatar: "🧔".to_string(),
+                coin_skin: "centenario".to_string(),
+                throw_number: 1,
+                x: 0.0,
+                y: 3.65,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+            // Secondary victim directly behind Victim A (should receive chain reaction)
+            SettledCoin {
+                id: "coin_victim_b".to_string(),
+                player_id: "p2".to_string(),
+                player_name: "Victim B".to_string(),
+                color: "#ef4444".to_string(),
+                avatar: "🤠".to_string(),
+                coin_skin: "diez_pesos".to_string(),
+                throw_number: 1,
+                x: 0.0,
+                y: 3.76,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+            // Untouched bystander coin far to the right
+            SettledCoin {
+                id: "coin_bystander".to_string(),
+                player_id: "p3".to_string(),
+                player_name: "Bystander".to_string(),
+                color: "#8b5cf6".to_string(),
+                avatar: "💀".to_string(),
+                coin_skin: "bronce_cantina".to_string(),
+                throw_number: 1,
+                x: 0.35,
+                y: 3.75,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+        ];
+
+        let bystander_x = coins[2].x;
+        let bystander_y = coins[2].y;
+
+        let res = simulate_throw(
+            "coin_striker",
+            "p4",
+            "Striker",
+            "#f59e0b",
+            "🔥",
+            "centenario",
+            "cajon_barro",
+            1,
+            0.0,
+            0.52,
+            26.0,
+            0.0,
+            &mut coins,
+        );
+
+        let knocked_ids: Vec<&str> = res.knockouts.iter().map(|k| k.victim_coin_id.as_str()).collect();
+        assert!(knocked_ids.contains(&"coin_victim_a"), "Victim A must be hit!");
+        assert!(!knocked_ids.contains(&"coin_bystander"), "Bystander must NEVER be hit!");
+
+        // Bystander coordinates must remain 100% untouched
+        assert_eq!(coins[2].x, bystander_x);
+        assert_eq!(coins[2].y, bystander_y);
     }
 }
