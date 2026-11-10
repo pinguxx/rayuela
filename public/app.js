@@ -707,8 +707,12 @@
             });
         }
 
-        // Calibrate animation duration so flight, bounce, and carambola slides are crystal clear
-        const animDurationMs = Math.max(1600, Math.min(2500, sim.flight_duration_s * 1000 * 1.35));
+        // Calibrate animation duration so flight, bounce, and all chain collisions play out completely
+        const maxCollisionTimeS = (sim.knockouts && sim.knockouts.length > 0)
+            ? Math.max(...sim.knockouts.map(k => k.collision_time_s))
+            : sim.flight_duration_s;
+        const baseFlightMs = sim.flight_duration_s * 1000 * 1.35;
+        const animDurationMs = Math.max(1800, Math.max(baseFlightMs, (maxCollisionTimeS * 1000) + 650));
 
         // Seamless handoff from client-side pending launch if this was the local player's throw
         let startOffset = 0;
@@ -1236,18 +1240,19 @@
                 if (activeFlightAnimation && activeFlightAnimation.knockoutsMap && activeFlightAnimation.knockoutsMap[coin.id]) {
                     const k = activeFlightAnimation.knockoutsMap[coin.id];
                     const elapsed = performance.now() - activeFlightAnimation.startTime;
-                    const animProg = Math.min(1.0, elapsed / activeFlightAnimation.animDurationMs);
                     const totalSimTime = activeFlightAnimation.sim.flight_duration_s || 1.0;
-                    const collTimeFrac = (k.collision_time_s / totalSimTime).clamp(0.05, 0.95);
+                    const collTimeMs = (k.collision_time_s / totalSimTime) * activeFlightAnimation.animDurationMs;
+                    const timeSinceCollisionMs = elapsed - collTimeMs;
 
-                    if (animProg < collTimeFrac) {
+                    if (timeSinceCollisionMs < 0) {
                         // BEFORE COLLISION: Coin stays stationary at its pre-collision position!
                         const p = worldToScreen25D(k.old_x, k.old_y, coin.z, w, h);
                         drawPerspectiveCoin(ctx, p.x, p.y, p.scale, coin, false, 1.0, 0);
                         return;
                     } else {
-                        // AFTER COLLISION: Coin slides with smooth cubic deceleration to new_x, new_y!
-                        const slideProg = Math.min(1.0, (animProg - collTimeFrac) / Math.max(0.05, (1.0 - collTimeFrac)));
+                        // AFTER COLLISION: Coin slides with smooth cubic ease-out deceleration over 450ms!
+                        const slideDurationMs = 450;
+                        const slideProg = Math.min(1.0, timeSinceCollisionMs / slideDurationMs);
                         const easeOutSlide = 1.0 - Math.pow(1.0 - slideProg, 3);
                         const curVictimX = k.old_x + (k.new_x - k.old_x) * easeOutSlide;
                         const curVictimY = k.old_y + (k.new_y - k.old_y) * easeOutSlide;

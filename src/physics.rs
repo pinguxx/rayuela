@@ -181,8 +181,9 @@ fn check_and_apply_collision(
     existing_coins: &mut [SettledCoin],
     knockouts: &mut Vec<KnockoutEvent>,
     sound_cue: &mut String,
-) {
+) -> bool {
     let min_dist = COIN_RADIUS * 2.05;
+    let mut any_hit = false;
 
     for i in 0..existing_coins.len() {
         if existing_coins[i].status != CoinStatus::InBox && existing_coins[i].status != CoinStatus::Clavada {
@@ -194,6 +195,7 @@ fn check_and_apply_collision(
         let dist = (dx * dx + dy * dy).sqrt();
 
         if dist < min_dist {
+            any_hit = true;
             let old_x = existing_coins[i].x;
             let old_y = existing_coins[i].y;
             let was_on = existing_coins[i].is_on_line;
@@ -205,8 +207,8 @@ fn check_and_apply_collision(
             };
             let overlap = min_dist - dist;
 
-            // Momentum transfer proportional to speed with a clear, visible push
-            let push_dist = (overlap + 0.07 + *slide_speed * 0.14).clamp(0.08, 0.38);
+            // Momentum transfer: strong visible push for victim
+            let push_dist = (overlap * 0.60 + 0.10 + *slide_speed * 0.16).clamp(0.12, 0.42);
             let target_x = (old_x + nx * push_dist).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
             let target_y = (old_y + ny * push_dist).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
 
@@ -220,12 +222,12 @@ fn check_and_apply_collision(
             existing_coins[i].dist_to_line_mm = existing_coins[i].dist_to_line_m * 1000.0;
             existing_coins[i].display_distance = format_distance(existing_coins[i].dist_to_line_mm, new_is_on);
 
-            // Thrown coin separates from contact point, deflects and loses speed
-            *cur_x -= nx * (overlap * 0.40);
-            *cur_y -= ny * (overlap * 0.40);
-            *slide_speed *= 0.35;
-            *slide_dir_x -= nx * 0.5;
-            *slide_dir_y -= ny * 0.5;
+            // Thrown coin separates from contact point, deflects, and retains enough speed to hit other coins!
+            *cur_x -= nx * (overlap * 0.50);
+            *cur_y -= ny * (overlap * 0.50);
+            *slide_speed = (*slide_speed * 0.72).max(0.22);
+            *slide_dir_x -= nx * 0.65;
+            *slide_dir_y -= ny * 0.65;
             let norm = (*slide_dir_x * *slide_dir_x + *slide_dir_y * *slide_dir_y).sqrt().max(0.001);
             *slide_dir_x /= norm;
             *slide_dir_y /= norm;
@@ -252,6 +254,7 @@ fn check_and_apply_collision(
             propagate_displacements(existing_coins, knockouts, current_time + 0.04, min_dist);
         }
     }
+    any_hit
 }
 
 /// Simulates a full physics throw with realistic multi-bounce, surface slide,
@@ -413,10 +416,10 @@ pub fn simulate_throw(
             let slide_dt = 0.035;
             let sub_steps = 4;
             let sub_dt = slide_dt / (sub_steps as f32);
-            let max_slide_steps = 22;
+            let max_slide_steps = 35;
 
             for _ in 0..max_slide_steps {
-                if slide_speed <= 0.08 {
+                if slide_speed <= 0.06 {
                     break;
                 }
 
@@ -429,7 +432,7 @@ pub fn simulate_throw(
                     if court.has_back_wall && cur_y >= (BOX_MAX_Y - 0.02) {
                         cur_y = BOX_MAX_Y - 0.02;
                         slide_dir_y = -slide_dir_y.abs(); // Rebound backwards toward line!
-                        slide_speed *= 0.65;
+                        slide_speed *= 0.70;
                         sound_cue = "wall_bounce".to_string();
                         trajectory.push(TrajectoryPoint {
                             x: cur_x,
@@ -441,7 +444,7 @@ pub fn simulate_throw(
                     }
 
                     // Check coin-on-coin collisions with zero tunneling
-                    check_and_apply_collision(
+                    let collided = check_and_apply_collision(
                         &mut cur_x,
                         &mut cur_y,
                         &mut slide_dir_x,
@@ -452,10 +455,19 @@ pub fn simulate_throw(
                         &mut knockouts,
                         &mut sound_cue,
                     );
+                    if collided {
+                        trajectory.push(TrajectoryPoint {
+                            x: cur_x,
+                            y: cur_y,
+                            z: 0.0,
+                            t: current_time,
+                            is_bounce: true,
+                        });
+                    }
                 }
 
                 // Surface friction deceleration
-                slide_speed -= court.friction * GRAVITY * slide_dt * 0.85;
+                slide_speed -= court.friction * GRAVITY * slide_dt * 0.75;
 
                 trajectory.push(TrajectoryPoint {
                     x: cur_x,
@@ -471,7 +483,9 @@ pub fn simulate_throw(
 
             // 4. Final Settling Separation: Guarantee NO two coins can ever sit overlapping on the board!
             let min_allowed = COIN_RADIUS * 2.05;
-            for _pass in 0..4 {
+            let mut any_settling_collision = false;
+
+            for pass in 0..5 {
                 let mut had_overlap = false;
                 for i in 0..existing_coins.len() {
                     if existing_coins[i].status != CoinStatus::InBox && existing_coins[i].status != CoinStatus::Clavada {
@@ -483,13 +497,14 @@ pub fn simulate_throw(
 
                     if dist < min_allowed {
                         had_overlap = true;
+                        any_settling_collision = true;
                         let (nx, ny) = if dist > 0.0001 {
                             (dx / dist, dy / dist)
                         } else {
                             (0.0, 1.0)
                         };
                         let overlap = min_allowed - dist;
-                        let push_amount = (overlap + 0.05).clamp(0.06, 0.30);
+                        let push_amount = (overlap + 0.07).clamp(0.08, 0.35);
 
                         let old_x = existing_coins[i].x;
                         let old_y = existing_coins[i].y;
@@ -498,8 +513,8 @@ pub fn simulate_throw(
                         existing_coins[i].x = (old_x + nx * push_amount).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
                         existing_coins[i].y = (old_y + ny * push_amount).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
 
-                        settled_x = (settled_x - nx * (overlap * 0.45)).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
-                        settled_y = (settled_y - ny * (overlap * 0.45)).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
+                        settled_x = (settled_x - nx * (overlap * 0.50)).clamp(BOX_MIN_X + COIN_RADIUS, BOX_MAX_X - COIN_RADIUS);
+                        settled_y = (settled_y - ny * (overlap * 0.50)).clamp(BOX_MIN_Y + COIN_RADIUS, BOX_MAX_Y - COIN_RADIUS);
 
                         let new_dist = (existing_coins[i].y - TARGET_LINE_Y).abs();
                         let new_is_on = new_dist <= COIN_RADIUS;
@@ -510,11 +525,16 @@ pub fn simulate_throw(
 
                         sound_cue = "knockout".to_string();
 
-                        if !knockouts.iter().any(|k| k.victim_coin_id == existing_coins[i].id) {
+                        let coll_time = current_time + (pass as f32) * 0.06;
+                        if let Some(existing_k) = knockouts.iter_mut().find(|k| k.victim_coin_id == existing_coins[i].id) {
+                            existing_k.new_x = existing_coins[i].x;
+                            existing_k.new_y = existing_coins[i].y;
+                            existing_k.is_now_on_line = new_is_on;
+                        } else {
                             knockouts.push(KnockoutEvent {
                                 victim_coin_id: existing_coins[i].id.clone(),
                                 victim_player_name: existing_coins[i].player_name.clone(),
-                                collision_time_s: current_time,
+                                collision_time_s: coll_time,
                                 collision_x: settled_x,
                                 collision_y: settled_y,
                                 old_x,
@@ -527,10 +547,22 @@ pub fn simulate_throw(
                         }
                     }
                 }
-                propagate_displacements(existing_coins, &mut knockouts, current_time, min_allowed);
+                propagate_displacements(existing_coins, &mut knockouts, current_time + 0.05, min_allowed);
                 if !had_overlap {
                     break;
                 }
+            }
+
+            // If settling separation adjusted settled_x, settled_y, append smooth settling trajectory point
+            if any_settling_collision || (settled_x - cur_x).abs() > 0.001 || (settled_y - cur_y).abs() > 0.001 {
+                current_time += 0.22;
+                trajectory.push(TrajectoryPoint {
+                    x: settled_x,
+                    y: settled_y,
+                    z: 0.0,
+                    t: current_time,
+                    is_bounce: true,
+                });
             }
 
             (settled_x, settled_y, CoinStatus::InBox)
@@ -834,6 +866,97 @@ mod tests {
                     all_settled[j].player_name,
                     dist,
                     min_required
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_thrown_coin_hits_multiple_coins_sequentially() {
+        // Coin 1 placed at y=3.62 (directly in the slide path after impact1 at ~3.60)
+        // Coin 2 placed at y=3.78 (downstream near the center line)
+        let mut coins = vec![
+            SettledCoin {
+                id: "coin_obstacle_1".to_string(),
+                player_id: "p1".to_string(),
+                player_name: "Obstacle 1".to_string(),
+                color: "#10b981".to_string(),
+                avatar: "🧔".to_string(),
+                coin_skin: "centenario".to_string(),
+                throw_number: 1,
+                x: 0.0,
+                y: 3.62,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: false,
+                dist_to_line_m: 0.13,
+                dist_to_line_mm: 130.0,
+                display_distance: "13.0 cm".to_string(),
+            },
+            SettledCoin {
+                id: "coin_obstacle_2".to_string(),
+                player_id: "p2".to_string(),
+                player_name: "Obstacle 2".to_string(),
+                color: "#ef4444".to_string(),
+                avatar: "🤠".to_string(),
+                coin_skin: "diez_pesos".to_string(),
+                throw_number: 1,
+                x: 0.01,
+                y: 3.78,
+                z: 0.005,
+                status: CoinStatus::InBox,
+                is_on_line: true,
+                dist_to_line_m: 0.0,
+                dist_to_line_mm: 0.0,
+                display_distance: "🎯 ¡EN LA RAYA!".to_string(),
+            },
+        ];
+
+        // Strong throw aimed straight down center
+        let res = simulate_throw(
+            "coin_striker",
+            "p3",
+            "Striker",
+            "#f59e0b",
+            "🔥",
+            "centenario",
+            "cajon_barro",
+            1,
+            0.0,
+            0.52,
+            26.0,
+            0.0,
+            &mut coins,
+        );
+
+        // Striker must hit both obstacle 1 and obstacle 2!
+        let victims: Vec<&str> = res.knockouts.iter().map(|k| k.victim_coin_id.as_str()).collect();
+        assert!(
+            victims.contains(&"coin_obstacle_1"),
+            "Should hit obstacle 1, knockouts: {:?}",
+            victims
+        );
+        assert!(
+            victims.contains(&"coin_obstacle_2"),
+            "Should hit obstacle 2 as well, knockouts: {:?}",
+            victims
+        );
+
+        // All 3 coins must have zero overlap
+        let mut all_settled = coins.clone();
+        all_settled.push(res.coin);
+        let min_required = COIN_RADIUS * 1.95;
+        for i in 0..all_settled.len() {
+            for j in (i + 1)..all_settled.len() {
+                let dx = all_settled[j].x - all_settled[i].x;
+                let dy = all_settled[j].y - all_settled[i].y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                assert!(
+                    dist >= min_required,
+                    "Overlap between {} and {}: dist={:.4}m",
+                    all_settled[i].player_name,
+                    all_settled[j].player_name,
+                    dist
                 );
             }
         }
