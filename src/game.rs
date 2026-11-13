@@ -214,9 +214,16 @@ impl GameRoom {
         }
 
         let throws_per_p = self.settings.throws_per_player.max(1) as usize;
+        let num_players = self.players.len();
+        let start_offset = if num_players > 0 {
+            (self.round_number.saturating_sub(1) as usize) % num_players
+        } else {
+            0
+        };
         for _ in 0..throws_per_p {
-            for p in &self.players {
-                self.turn_order.push(p.id.clone());
+            for i in 0..num_players {
+                let idx = (start_offset + i) % num_players;
+                self.turn_order.push(self.players[idx].id.clone());
             }
         }
 
@@ -541,5 +548,55 @@ pub fn random_cantina_dicho(is_rayada: bool, is_clavada: bool, is_miss: bool) ->
             ("¡Bien jugado! ¡Esa moneda está en buena posición!", "Well played! That coin is in a great spot!"),
         ];
         options[rng.random_range(0..options.len())]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_player(id: &str, name: &str) -> Player {
+        Player {
+            id: id.to_string(),
+            name: name.to_string(),
+            avatar: "🤠".to_string(),
+            color: "#f59e0b".to_string(),
+            coin_skin: "centenario".to_string(),
+            is_bot: false,
+            bot_profile_id: None,
+            is_host: id == "p1",
+            is_connected: true,
+            reconnect_token: format!("tok_{}", id),
+            score: 0,
+            total_throws: 0,
+            rayadas: 0,
+            clavadas: 0,
+            knockouts: 0,
+            best_distance_mm: 999999.0,
+        }
+    }
+
+    #[test]
+    fn test_turn_order_rotates_each_round() {
+        let mut room = GameRoom::new("TEST".to_string(), dummy_player("p1", "P1"));
+        room.players.push(dummy_player("p2", "P2"));
+        room.players.push(dummy_player("p3", "P3"));
+        room.settings.throws_per_player = 2;
+
+        room.start_game().unwrap();
+        assert_eq!(room.round_number, 1);
+        assert_eq!(room.turn_order, vec!["p1", "p2", "p3", "p1", "p2", "p3"]);
+
+        room.round_number = 2;
+        room.start_new_round();
+        assert_eq!(room.turn_order, vec!["p2", "p3", "p1", "p2", "p3", "p1"]);
+
+        room.round_number = 3;
+        room.start_new_round();
+        assert_eq!(room.turn_order, vec!["p3", "p1", "p2", "p3", "p1", "p2"]);
+
+        room.round_number = 4;
+        room.start_new_round();
+        assert_eq!(room.turn_order, vec!["p1", "p2", "p3", "p1", "p2", "p3"]);
     }
 }

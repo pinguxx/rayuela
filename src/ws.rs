@@ -532,6 +532,13 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                             {
                                 room.round_number += 1;
                                 room.start_new_round();
+                                if room.current_active_player().map(|p| p.is_bot).unwrap_or(false) {
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64;
+                                    room.min_next_throw_unix_ms = now + 900;
+                                }
                                 drop(rooms);
                                 broadcast_room_state(&state, code).await;
                             }

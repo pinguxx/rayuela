@@ -495,10 +495,26 @@
                 showToast(`Te uniste a la sala ${ev.room_code}`);
                 break;
 
-            case 'room_state':
+            case 'room_state': {
+                const prevRoom = currentRoom;
                 currentRoom = ev.room;
                 updateRoomStateUI(ev.room);
+                if (
+                    prevRoom &&
+                    ev.room &&
+                    ev.room.round_number > 1 &&
+                    ev.room.phase === 'throwing' &&
+                    ev.room.turn_index === 0 &&
+                    (prevRoom.round_number < ev.room.round_number || prevRoom.phase === 'round_review')
+                ) {
+                    const openerId = ev.room.turn_order && ev.room.turn_order[0];
+                    const opener = openerId && ev.room.players && ev.room.players.find(p => p.id === openerId);
+                    if (opener) {
+                        showToast(`🔄 Ronda ${ev.room.round_number}: abre el turno ${opener.name}`);
+                    }
+                }
                 break;
+            }
 
             case 'throw_executed':
                 handleThrowAnimation(ev);
@@ -642,6 +658,8 @@
 
         sorted.forEach(p => {
             const isTurn = room.phase === 'throwing' && p.id === (room.turn_order[room.turn_index] || '');
+            const turnOrderPos = Array.isArray(room.turn_order) ? room.turn_order.indexOf(p.id) : -1;
+            const turnOrderBadge = turnOrderPos >= 0 ? `Turno #${turnOrderPos + 1} | ` : '';
             const row = document.createElement('div');
             row.className = `score-row ${isTurn ? 'active-turn' : ''}`;
             row.innerHTML = `
@@ -649,7 +667,7 @@
                     <span style="font-size:22px;">${p.avatar}</span>
                     <div>
                         <div style="color:${p.color};font-weight:700;">${escapeHtml(p.name)}</div>
-                        <div style="font-size:11px;color:#94a3b8;font-family:sans-serif;">Rayadas: ${p.rayadas} | Mejor: ${formatDistDisplay(p.best_distance_mm)}</div>
+                        <div style="font-size:11px;color:#94a3b8;font-family:sans-serif;">${turnOrderBadge}Rayadas: ${p.rayadas} | Mejor: ${formatDistDisplay(p.best_distance_mm)}</div>
                     </div>
                 </div>
                 <div class="score-points" style="color:${p.color}">${p.score}</div>
