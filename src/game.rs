@@ -36,7 +36,7 @@ pub const PLAYER_AVATARS: [&str; 10] = [
 pub const BOT_PROFILES: [(&str, &str, f32, &str); 7] = [
     ("Don Ramón", "🧔", 0.018, "#f59e0b"),
     ("Doña Chelo", "👵", 0.020, "#ec4899"),
-    ("El Cantinero", "🧑", 0.028, "#0284c7"),
+    ("El Maestro", "🧑", 0.028, "#0284c7"),
     ("El Charro", "🤠", 0.030, "#f97316"),
     ("La Catrina", "💀", 0.035, "#8b5cf6"),
     ("El Taquero", "🌮", 0.040, "#10b981"),
@@ -47,7 +47,7 @@ pub const COIN_SKINS: [(&str, &str, &str); 4] = [
     ("centenario", "Centenario de Oro", "50 Pesos Oro / Ángel de la Independencia"),
     ("diez_pesos", "Diez Pesos Sol", "Piedra del Sol / Bimetálica"),
     ("plata_zapata", "Plata Zapata", "Plata Ley 0.720 Revolucionaria"),
-    ("bronce_cantina", "Ficha de Cantina", "Bronce Patinado Tradicional"),
+    ("bronce_cantina", "Ficha de Feria", "Bronce Tradicional"),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -432,27 +432,27 @@ impl GameRoom {
             None
         };
 
-        // Formulate cantina verdict
+        // Formulate family-friendly round verdict
         let summary_es = if let Some(ref wid) = match_winner_id {
             let winner = self.players.iter().find(|p| &p.id == wid).unwrap();
-            format!("🏆 ¡{} se lleva la victoria con {} puntos! ¡La cantina entera le aplaude!", winner.name, winner.score)
+            format!("🏆 ¡{} se lleva la victoria con {} puntos! ¡Gran campeonato!", winner.name, winner.score)
         } else if had_rayada {
-            "🎯 ¡Hubo monedas en la mera raya! ¡La precisión manda!".to_string()
+            "🎯 ¡Moneda en la línea! ¡Qué gran puntería!".to_string()
         } else if let Some(ref cname) = closest_player_name {
             format!("📏 El punto de distancia es para {} ({})", cname, best_dist_display)
         } else {
-            "💨 Todos los tiros salieron volando. ¡Nadie suma esta tanda!".to_string()
+            "💨 Ninguna moneda quedó dentro en esta ronda. ¡Sigue intentando!".to_string()
         };
 
         let summary_en = if let Some(ref wid) = match_winner_id {
             let winner = self.players.iter().find(|p| &p.id == wid).unwrap();
-            format!("🏆 {} wins the match with {} points! The cantina celebrates!", winner.name, winner.score)
+            format!("🏆 {} wins the match with {} points! Congratulations!", winner.name, winner.score)
         } else if had_rayada {
             "🎯 Coins landed directly on the line! Precision wins!".to_string()
         } else if let Some(ref cname) = closest_player_name {
             format!("📏 Distance point awarded to {} ({})", cname, best_dist_display)
         } else {
-            "💨 All coins missed the box. No points awarded this round!".to_string()
+            "💨 All coins missed the box. Keep trying next round!".to_string()
         };
 
         self.last_verdict = Some(RoundVerdict {
@@ -516,29 +516,29 @@ pub fn random_cantina_dicho(is_rayada: bool, is_clavada: bool, is_miss: bool) ->
     let mut rng = rand::rng();
     if is_clavada {
         let options = [
-            ("¡De piquito! ¡Esa nadie la saca!", "Edge-stick! That one is untouchable!"),
-            ("¡Clavadón de antología, señores!", "A historic clavada, ladies and gentlemen!"),
+            ("¡Tiro perfecto! ¡Quedó clavada en el barro!", "Perfect shot! Stuck right in the clay!"),
+            ("¡Qué puntería! ¡Clavada maestra de 5 puntos!", "Amazing aim! Master 5-point stick!"),
         ];
         options[rng.random_range(0..options.len())]
     } else if is_rayada {
         let options = [
-            ("¡Esa raya tiene dueño!", "That line has an owner!"),
-            ("¡Pura seda, compadre! ¡Se planchó!", "Pure silk, buddy! Perfect landing!"),
-            ("¡En la mera raya! ¡Córranle una fría!", "Right on the line! Bring this player a cold drink!"),
+            ("¡Directo en la línea! ¡Tiro de campeón!", "Right on the line! Champion shot!"),
+            ("¡Puntería perfecta! ¡Tocó la raya!", "Perfect accuracy! Touching the line!"),
+            ("¡Excelente lanzamiento! ¡Justo en el centro!", "Excellent throw! Right in the center!"),
         ];
         options[rng.random_range(0..options.len())]
     } else if is_miss {
         let options = [
-            ("¡Esa va pal estacionamiento!", "That one is heading for the parking lot!"),
-            ("¡Se te fue la chiva al monte!", "Your goat ran off into the wild!"),
-            ("¡Paga la ronda, marchante!", "Pay the round, my friend!"),
+            ("¡Uy, se pasó un poquito! ¡La próxima sale mejor!", "Oh, a bit too far! Next one will be better!"),
+            ("¡Casi entra! ¡Ajusta tu fuerza en el siguiente turno!", "Almost in! Adjust your power next turn!"),
+            ("¡Salió fuera de la cancha! ¡No te rindas!", "Out of bounds! Keep trying!"),
         ];
         options[rng.random_range(0..options.len())]
     } else {
         let options = [
-            ("¡Mídela con billete de a veinte!", "Measure it with a twenty-peso bill!"),
-            ("¡A su mecha, qué tiro!", "Holy smoke, what a toss!"),
-            ("¡Cuidado con la carambola!", "Watch out for the bounce and knock!"),
+            ("¡Buen tiro! ¡Quedó muy cerca de la línea!", "Good shot! Very close to the line!"),
+            ("¡Gran lanzamiento! ¡Vamos a medir la distancia!", "Great throw! Let's measure the distance!"),
+            ("¡Bien jugado! ¡Esa moneda está en buena posición!", "Well played! That coin is in a great spot!"),
         ];
         options[rng.random_range(0..options.len())]
     }

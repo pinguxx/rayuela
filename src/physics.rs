@@ -85,6 +85,7 @@ struct CourtPhysics {
     max_x: f32,
     min_y: f32,
     max_y: f32,
+    lateral_scale: f32,  // Lateral sensitivity scaling across court width
 }
 
 fn get_court_physics(theme: &str) -> CourtPhysics {
@@ -95,8 +96,9 @@ fn get_court_physics(theme: &str) -> CourtPhysics {
             has_back_wall: true,
             min_x: -1.10,
             max_x: 1.10,
-            min_y: 0.15, // Playable cantina tile floor from throw line to back wall
+            min_y: 0.15, // Playable tile floor from throw line to back wall
             max_y: 4.50, // Rebound wall at 4.5m
+            lateral_scale: 0.50,
         },
         _ => CourtPhysics {
             // "cajon_barro" default (heavy damp clay absorbs almost all vertical bounce)
@@ -107,6 +109,7 @@ fn get_court_physics(theme: &str) -> CourtPhysics {
             max_x: BOX_MAX_X,
             min_y: BOX_MIN_Y,
             max_y: BOX_MAX_Y,
+            lateral_scale: 0.35,
         },
     }
 }
@@ -317,7 +320,7 @@ pub fn simulate_throw(
 
     // Initial velocity vectors
     let v_forward = speed * elev_rad.cos();
-    let mut vx = v_forward * angle_rad.sin();
+    let mut vx = v_forward * angle_rad.sin() * court.lateral_scale;
     let mut vy = v_forward * angle_rad.cos();
     let vz0 = speed * elev_rad.sin();
 
@@ -769,8 +772,9 @@ pub fn calculate_bot_throw(
         _ => 0.52,            // cajon_barro damp clay
     };
 
-    // Lateral angle to hit target_x from (0,0)
-    let ideal_angle = (target_x / target_y).atan().to_degrees();
+    // Lateral angle to hit target_x from (0,0) calibrated by court lateral scale
+    let court = get_court_physics(court_theme);
+    let ideal_angle = ((target_x / target_y) / court.lateral_scale).atan().to_degrees();
 
     // Box-Muller Gaussian jitter
     let u1: f32 = rng.random_range(0.0001..1.0);
@@ -779,7 +783,7 @@ pub fn calculate_bot_throw(
     let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).sin();
 
     let jittered_power = (ideal_power + (z0 * variance_sigma * 0.5)).clamp(0.10, 0.95);
-    let jittered_angle = (ideal_angle + (z1 * variance_sigma * 45.0)).clamp(-25.0, 25.0);
+    let jittered_angle = (ideal_angle + (z1 * variance_sigma * 45.0)).clamp(-18.0, 18.0);
     let jittered_elevation = (ideal_elevation + (z0 * 1.5)).clamp(22.0, 38.0);
     let spin = rng.random_range(-0.35..0.35);
 
@@ -1286,5 +1290,43 @@ mod tests {
             victims
         );
         assert_ne!(coins[0].y, orig_y, "Target coin must be displaced by collision!");
+    }
+
+    #[test]
+    fn test_moderate_angle_stays_in_bounds() {
+        for angle in [12.0_f32, -12.0_f32] {
+            let mut coins = Vec::new();
+            let res = simulate_throw(
+                "coin_angled",
+                "p1",
+                "Player 1",
+                "#f59e0b",
+                "🤠",
+                "centenario",
+                "cajon_barro",
+                1,
+                angle,
+                0.465,
+                28.0,
+                0.0,
+                &mut coins,
+            );
+            assert_eq!(
+                res.coin.status,
+                CoinStatus::InBox,
+                "Moderate angle {} deg should land inside cajon_barro, got {:?} at ({:.3}, {:.3})",
+                angle,
+                res.coin.status,
+                res.coin.x,
+                res.coin.y
+            );
+            assert!(
+                res.coin.x.abs() < BOX_MAX_X,
+                "Coin x ({:.3}) should be strictly inside [-{:.2}, {:.2}]",
+                res.coin.x,
+                BOX_MAX_X,
+                BOX_MAX_X
+            );
+        }
     }
 }

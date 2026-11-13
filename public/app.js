@@ -20,6 +20,7 @@
 
     // Throw input state
     let isDragging = false;
+    let activePointerId = null;
     let dragStartPos = { x: 0, y: 0 };
     let dragCurrentPos = { x: 0, y: 0 };
     let aimingAngleDeg = 0;
@@ -348,7 +349,7 @@
                     audio.speechEnabled = !audio.speechEnabled;
                     btnVoice.textContent = audio.speechEnabled ? '🎙️ Voz ON' : '🔇 Voz OFF';
                     btnVoice.style.opacity = audio.speechEnabled ? '1.0' : '0.6';
-                    showToast(audio.speechEnabled ? '🎙️ Narrador cantinero activado' : '🔇 Narrador en silencio');
+                    showToast(audio.speechEnabled ? '🎙️ Narrador activado' : '🔇 Narrador en silencio');
                 }
             });
         }
@@ -662,9 +663,9 @@
         const elMobTurnPill = document.getElementById('mobile-hud-turn');
 
         if (!room || room.phase !== 'throwing') {
-            elActiveThrowerName.textContent = room && room.phase === 'round_review' ? 'Dictamen del Cantinero...' : 'Fin de Partida';
+            elActiveThrowerName.textContent = room && room.phase === 'round_review' ? 'Calculando Puntos...' : 'Fin de Partida';
             elTurnTimer.style.display = 'none';
-            if (elMobStatus) elMobStatus.textContent = room && room.phase === 'round_review' ? 'Dictamen...' : 'Pausa';
+            if (elMobStatus) elMobStatus.textContent = room && room.phase === 'round_review' ? 'Calculando...' : 'Pausa';
             if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
             clearInterval(timerInterval);
             if (elFlickInstruction) elFlickInstruction.textContent = "Partida en pausa";
@@ -685,7 +686,7 @@
             if (elMobTurnPill) elMobTurnPill.classList.remove('my-turn');
             if (elFlickInstruction) {
                 elFlickInstruction.textContent = isPisoPared
-                    ? "Esperando a que la moneda se detenga en la cantina..."
+                    ? "Esperando a que la moneda se detenga en la cancha..."
                     : "Esperando a que la moneda se asiente en el barro...";
             }
         } else if (isMe) {
@@ -756,7 +757,10 @@
             currentRoom = ev.room;
         }
 
-        audio.playCoinFlight();
+        const wasLocalPending = (pendingLaunch !== null);
+        if (!wasLocalPending) {
+            audio.playCoinFlight();
+        }
 
         // Build knockouts map for responsive victim coin recoil
         const knockoutsMap = {};
@@ -776,7 +780,9 @@
         // Seamless handoff from client-side pending launch if this was the local player's throw
         let startOffset = 0;
         if (pendingLaunch) {
-            startOffset = Math.min(performance.now() - pendingLaunch.startTime, 350);
+            const currentSimT = pendingLaunch.simTime || 0;
+            const totalSimT = sim.flight_duration_s || 1.0;
+            startOffset = Math.min((currentSimT / totalSimT) * animDurationMs, animDurationMs * 0.75);
             pendingLaunch = null;
         }
 
@@ -940,10 +946,10 @@
         }
         elVictoryPodium.innerHTML = podiumHtml;
 
-        // 2. Compute Special Awards (Premios Especiales & Distinciones de Cantina)
+        // 2. Compute Special Awards (Premios Especiales y Reconocimientos)
         const awards = [];
 
-        // Award 1: La Raya de Oro (El Ojo de Águila) - Most rayadas or closest distance
+        // Award 1: Mejor Puntería (Ojo de Águila) - Most rayadas or closest distance
         const bestRayador = [...room.players].sort((a, b) => {
             if (b.rayadas !== a.rayadas) return b.rayadas - a.rayadas;
             return a.best_distance_mm - b.best_distance_mm;
@@ -951,27 +957,27 @@
         if (bestRayador) {
             awards.push({
                 icon: '🎯',
-                title: 'La Raya de Oro (Ojo de Águila)',
+                title: 'Mejor Puntería (Ojo de Águila)',
                 recipient: bestRayador,
                 desc: bestRayador.rayadas > 0
-                    ? `Encajó ${bestRayador.rayadas} moneda(s) exactamente en la raya.`
+                    ? `Dejó ${bestRayador.rayadas} moneda(s) exactamente en la raya.`
                     : `Tiro más certero a solo ${formatDistDisplay(bestRayador.best_distance_mm)}.`
             });
         }
 
-        // Award 2: El Toro de la Cantina (Carambolas & Knockouts)
+        // Award 2: Rey de la Carambola (Carambolas & Knockouts)
         const bestBrawler = [...room.players].sort((a, b) => b.knockouts - a.knockouts)[0];
         if (bestBrawler && bestBrawler.knockouts > 0) {
             awards.push({
                 icon: '💥',
-                title: 'El Toro de la Cantina',
+                title: 'Rey de la Carambola',
                 recipient: bestBrawler,
-                desc: `Expulsó ${bestBrawler.knockouts} moneda(s) rivales con carambolas limpias.`
+                desc: `Desplazó ${bestBrawler.knockouts} moneda(s) rivales con carambolas limpias.`
             });
         } else {
             awards.push({
                 icon: '🕊️',
-                title: 'Tiro de Seda (Juego Limpio)',
+                title: 'Juego Limpio',
                 recipient: winner,
                 desc: 'Victoria con maestría y sin desplazar monedas contrarias.'
             });
@@ -991,9 +997,9 @@
             } else {
                 awards.push({
                     icon: '🏺',
-                    title: 'Señor del Barro',
+                    title: 'Maestro del Barro',
                     recipient: runnerUp || winner,
-                    desc: 'Excelente control del deslizamiento en arcilla pesada.'
+                    desc: 'Excelente control del deslizamiento sobre la tierra húmeda.'
                 });
             }
         } else {
@@ -1005,14 +1011,14 @@
             });
         }
 
-        // Award 4: La Botana y la Ronda (Humor mexicano de cantina para el último lugar)
+        // Award 4: Espíritu Deportivo (family-friendly participation award)
         if (sorted.length >= 2) {
             const lastPlacePlayer = sorted[sorted.length - 1];
             awards.push({
-                icon: '🍺',
-                title: 'Paga la Ronda y la Botana',
+                icon: '🌟',
+                title: 'Espíritu Deportivo',
                 recipient: lastPlacePlayer,
-                desc: '¡Tradición de cantina! Al último lugar le tocan los tacos y las frías 🌮🍻.'
+                desc: '¡Gran entusiasmo y buena actitud en cada lanzamiento!'
             });
         }
 
@@ -1105,7 +1111,13 @@
         canvas.addEventListener('pointerdown', onPointerDown);
         canvas.addEventListener('pointermove', onPointerMove);
         canvas.addEventListener('pointerup', onPointerUp);
-        canvas.addEventListener('pointercancel', onPointerUp);
+        canvas.addEventListener('pointercancel', onPointerCancel);
+    }
+
+    function resetAimIndicators() {
+        elAngleValue.textContent = `0.0°`;
+        elPowerValue.textContent = `0%`;
+        elPowerFill.style.width = `0%`;
     }
 
     function isMyTurn() {
@@ -1118,27 +1130,33 @@
     function onPointerDown(e) {
         if (!isMyTurn()) {
             if (activeFlightAnimation !== null || pendingLaunch !== null || isWaitingForNextTurn) {
-                showToast("Espera a que la moneda se detenga en el barro");
+                showToast("Espera a que la moneda se detenga");
             }
             return;
         }
+        if (isDragging || activePointerId !== null) return;
         isDragging = true;
+        activePointerId = e.pointerId;
         const rect = canvas.getBoundingClientRect();
         dragStartPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
         dragCurrentPos = { ...dragStartPos };
+        aimingAngleDeg = 0;
+        aimingPower = 0.05;
         canvas.setPointerCapture(e.pointerId);
     }
 
     function onPointerMove(e) {
-        if (!isDragging) return;
+        if (!isDragging || e.pointerId !== activePointerId) return;
         const rect = canvas.getBoundingClientRect();
         dragCurrentPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 
         const dx = dragCurrentPos.x - dragStartPos.x;
         const dy = dragCurrentPos.y - dragStartPos.y;
 
-        // Angle derived from lateral drag offset
-        aimingAngleDeg = (dx * 0.18).clamp(-25.0, 25.0);
+        // Lateral angle with 8px deadzone and gentle sensitivity
+        const absDx = Math.abs(dx);
+        const effDx = absDx <= 8.0 ? 0.0 : Math.sign(dx) * (absDx - 8.0);
+        aimingAngleDeg = (effDx * 0.10).clamp(-18.0, 18.0);
 
         // Power derived from pull-down distance (sling style) or flick
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1156,17 +1174,19 @@
     }
 
     function onPointerUp(e) {
-        if (!isDragging) return;
+        if (!isDragging || e.pointerId !== activePointerId) return;
         isDragging = false;
+        activePointerId = null;
 
         const dx = dragCurrentPos.x - dragStartPos.x;
         const dy = dragCurrentPos.y - dragStartPos.y;
         const totalDist = Math.sqrt(dx * dx + dy * dy);
 
         if (totalDist >= 8 && isMyTurn()) {
-            // Immediate client-side launch: coin begins flight instantly without disappearing
+            // Immediate client-side launch synchronized to server time-scale
             pendingLaunch = {
                 startTime: performance.now(),
+                simTime: 0,
                 power: aimingPower,
                 angleDeg: aimingAngleDeg,
                 elevationDeg: aimingElevation,
@@ -1192,10 +1212,16 @@
             });
         }
 
-        // Reset indicator visuals
-        elAngleValue.textContent = `0.0°`;
-        elPowerValue.textContent = `0%`;
-        elPowerFill.style.width = `0%`;
+        resetAimIndicators();
+    }
+
+    function onPointerCancel(e) {
+        if (!isDragging || e.pointerId !== activePointerId) return;
+        isDragging = false;
+        activePointerId = null;
+        aimingAngleDeg = 0;
+        aimingPower = 0.05;
+        resetAimIndicators();
     }
 
     // --- Perspective & Projection Mathematics ---
@@ -1625,23 +1651,28 @@
         // 3b. Render Immediate Client-Side Flight (Pending server confirmation)
         if (pendingLaunch && !activeFlightAnimation) {
             const now = performance.now();
-            const t = (now - pendingLaunch.startTime) / 1000;
+            const elapsedMs = now - pendingLaunch.startTime;
+            const simTime = (elapsedMs / 1800) * 1.05;
+            pendingLaunch.simTime = simTime;
+
             const radAngle = (pendingLaunch.angleDeg * Math.PI) / 180;
             const radElev = (pendingLaunch.elevationDeg * Math.PI) / 180;
             const courtTheme = (currentRoom && currentRoom.settings && currentRoom.settings.court_theme) || selectedCourtTheme || 'cajon_barro';
             const speed = courtTheme === 'piso_pared'
                 ? 2.4 + (pendingLaunch.power * 4.8)
                 : 4.2 + (pendingLaunch.power * 4.4);
-            const vx = speed * Math.cos(radElev) * Math.sin(radAngle);
-            const vy = speed * Math.cos(radElev) * Math.cos(radAngle);
+            const lateralScale = getCourtLateralScale(courtTheme);
+            const vForward = speed * Math.cos(radElev);
+            const vx = vForward * Math.sin(radAngle) * lateralScale;
+            const vy = vForward * Math.cos(radAngle);
             const vz = speed * Math.sin(radElev);
 
-            const curX = vx * t;
-            const curY = 0.2 + vy * t;
-            const curZ = Math.max(0.0, 0.12 + vz * t - 0.5 * 9.81 * t * t);
+            const curX = vx * simTime;
+            const curY = vy * simTime;
+            const curZ = Math.max(0.0, 0.05 + vz * simTime - 0.5 * 9.81 * simTime * simTime);
             const inAir = curZ > 0.02;
             const flips = inAir ? 4.5 : 0;
-            const tiltY = inAir ? (Math.abs(Math.cos(t * Math.PI * 2 * flips)) * 0.72 + 0.28) : 1.0;
+            const tiltY = inAir ? (Math.abs(Math.cos(simTime * Math.PI * 2 * flips)) * 0.72 + 0.28) : 1.0;
 
             // Ground shadow
             const shadowP = worldToScreen25D(curX, curY, 0.0, w, h);
@@ -1669,6 +1700,10 @@
             const tlCenter = worldToScreen25D(0.0, 0.2, 0.0, w, h);
 
             if (isDragging) {
+                // Clamp dragged handle inside a compact slingshot pocket near the throw line
+                const pocketX = tlCenter.x + (dragCurrentPos.x - dragStartPos.x).clamp(-36, 36);
+                const pocketY = tlCenter.y + (dragCurrentPos.y - dragStartPos.y).clamp(-18, 44);
+
                 // Elastic cords from throw line anchors to the dragged coin
                 const anchorL = worldToScreen25D(-0.25, 0.2, 0.0, w, h);
                 const anchorR = worldToScreen25D(0.25, 0.2, 0.0, w, h);
@@ -1678,16 +1713,16 @@
                 ctx.lineWidth = 3;
                 ctx.beginPath();
                 ctx.moveTo(anchorL.x, anchorL.y);
-                ctx.lineTo(dragCurrentPos.x, dragCurrentPos.y);
+                ctx.lineTo(pocketX, pocketY);
                 ctx.moveTo(anchorR.x, anchorR.y);
-                ctx.lineTo(dragCurrentPos.x, dragCurrentPos.y);
+                ctx.lineTo(pocketX, pocketY);
                 ctx.stroke();
 
                 // Draw aiming trajectory
                 drawAimingTrajectory(ctx, w, h);
 
-                // Draw coin following the drag handle
-                drawPerspectiveCoin(ctx, dragCurrentPos.x, dragCurrentPos.y, tlCenter.scale * 1.05, myPlayerCoin, false, 0.9, 0);
+                // Draw coin inside the slingshot pocket
+                drawPerspectiveCoin(ctx, pocketX, pocketY, tlCenter.scale * 1.05, myPlayerCoin, false, 0.9, 0);
                 ctx.restore();
             } else {
                 // Idle resting coin on the throw line with pulsing glow
@@ -1895,6 +1930,10 @@
         ctx.restore();
     }
 
+    function getCourtLateralScale(courtTheme) {
+        return courtTheme === 'piso_pared' ? 0.50 : 0.35;
+    }
+
     function drawAimingTrajectory(ctx, w, h) {
         ctx.save();
         const pStart = worldToScreen25D(0.0, 0.2, 0.0, w, h);
@@ -1910,7 +1949,7 @@
         const targetY = courtTheme === 'piso_pared'
             ? (0.8 + (aimingPower * 4.1)).clamp(0.6, 4.5)
             : (2.0 + (aimingPower * 2.8)).clamp(1.5, 4.5);
-        const targetX = (aimingAngleDeg / 25.0) * (courtTheme === 'piso_pared' ? 0.85 : 0.45);
+        const targetX = targetY * Math.tan((aimingAngleDeg * Math.PI) / 180) * getCourtLateralScale(courtTheme);
 
         for (let t = 0.1; t <= 1.0; t += 0.08) {
             const wy = 0.2 + (t * (targetY - 0.2));
@@ -2160,7 +2199,7 @@
 
         tCtx.fillStyle = '#fef08a';
         tCtx.font = '20px sans-serif';
-        tCtx.fillText('CERTIFICADO OFICIAL DE VICTORIA DE CANTINA', 400, 140);
+        tCtx.fillText('CERTIFICADO OFICIAL DE CAMPEÓN DE RAYUELA', 400, 140);
 
         // Winner Avatar & Crown
         tCtx.font = '80px sans-serif';
@@ -2203,7 +2242,7 @@
         tCtx.fillText(`Sala: ${currentRoom.room_code} | Meta: ${currentRoom.settings.target_points} Puntos | ${new Date().toLocaleDateString()}`, 400, 830);
         tCtx.fillStyle = '#fcd34d';
         tCtx.font = '16px sans-serif';
-        tCtx.fillText(`🍺 La botana y la ronda le tocan a: ${sorted[sorted.length - 1].name} 🌮 ¡Salud!`, 400, 868);
+        tCtx.fillText('🌟 ¡Gracias a todos por compartir una gran partida! 🌟', 400, 868);
 
         // Download trigger
         const link = document.createElement('a');
@@ -2235,7 +2274,7 @@
             centenario: 'Centenario de Oro',
             diez_pesos: 'Diez Pesos Sol',
             plata_zapata: 'Plata Zapata',
-            bronce_cantina: 'Ficha de Bronce'
+            bronce_cantina: 'Ficha de Feria'
         };
         return map[skin] || 'Centenario';
     }

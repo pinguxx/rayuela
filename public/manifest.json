@@ -1,7 +1,7 @@
 {
   "name": "Rayuela Mexicana — El Cajón de Barro",
   "short_name": "Rayuela",
-  "description": "El tradicional juego mexicano de cantina de precisión con monedas. Multijugador en tiempo real con Rust, WebSockets y física 2.5D.",
+  "description": "El tradicional juego mexicano de precisión con monedas. Multijugador en tiempo real con Rust, WebSockets y física 2.5D.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f0a06",

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>🪙 Rayuela Mexicana — El Cajón de Barro</title>
   
-  <meta name="description" content="El tradicional juego mexicano de cantina de precisión con monedas. Multijugador en tiempo real con Rust, WebSockets y física en 2.5D.">
+  <meta name="description" content="El tradicional juego mexicano de precisión con monedas. Multijugador en tiempo real con Rust, WebSockets y física en 2.5D.">
   <meta name="theme-color" content="#1a0f08">
 
   <!-- Fonts -->
@@ -45,8 +45,8 @@
     <!-- 1. LOBBY SCREEN -->
     <section id="screen-lobby" class="screen active">
       <div class="cantina-banner-card">
-        <h2>Tradición de Cantina</h2>
-        <p class="subtitle">Afina la puntería, mide el tiro y plana la moneda en la mera raya.</p>
+        <h2>Tradición Mexicana</h2>
+        <p class="subtitle">Afina la puntería, mide el tiro y posa la moneda en la mera raya.</p>
 
         <!-- Player Name -->
         <div class="form-group">
@@ -94,8 +94,8 @@
             <div class="skin-card" data-skin="bronce_cantina">
               <div class="skin-icon">🟤</div>
               <div class="skin-info">
-                <h4>Ficha Cantina</h4>
-                <p>Bronce Clásico</p>
+                <h4>Ficha de Feria</h4>
+                <p>Bronce Tradicional</p>
               </div>
             </div>
           </div>
@@ -116,7 +116,7 @@
               <div class="court-icon">🏛️</div>
               <div class="court-info">
                 <h4>Piso & Pared</h4>
-                <p>Baldosa de cantina, rebote vivo y carambola en pared de madera</p>
+                <p>Piso tradicional, rebote vivo y carambola en pared de madera</p>
               </div>
             </div>
           </div>
@@ -154,7 +154,7 @@
         <!-- Lobby Action Buttons -->
         <div class="lobby-actions">
           <button id="btn-create-room" class="btn-primary">
-            <span>✨</span> Crear Sala de Cantina
+            <span>✨</span> Crear Sala de Juego
           </button>
 
           <div style="text-align:center;color:#78350f;font-size:12px;margin:4px 0;">— O ÚNETE CON UN CÓDIGO —</div>
@@ -194,7 +194,7 @@
             <div>📦 <strong>Cancha:</strong> <span id="waiting-court-display" style="color:var(--gold-glow);font-weight:700;">Cajón de Barro</span></div>
             
             <div style="background:#100703;padding:10px;border-radius:6px;border-left:3px solid var(--gold-centenario);margin-top:6px;">
-              <strong style="color:var(--gold-glow);">Puntajes de Cantina:</strong><br>
+              <strong style="color:var(--gold-glow);">Reglas de Puntuación:</strong><br>
               🎯 <strong>Rayada (en la línea):</strong> 3 pts<br>
               ⭐ <strong>Clavada (en barro):</strong> 5 pts<br>
               📏 <strong>Moneda más cercana:</strong> 1 pt<br>
@@ -229,7 +229,7 @@
             <h3 id="scoreboard-round">Ronda 1</h3>
             <div class="chalkboard-sub">
               <span id="scoreboard-target">Meta: 15 pts</span>
-              <span>Pizarra de Cantina</span>
+              <span>Marcador Oficial</span>
             </div>
           </div>
 
@@ -283,13 +283,13 @@
               👆 Desliza tu dedo hacia adelante o arrastra hacia atrás para lanzar tu moneda
             </div>
 
-            <!-- Cantina Quick Reactions -->
+            <!-- Quick Reactions -->
             <div class="reactions-bar">
               <button class="btn-reaction" data-text="¡Esa raya es mía!" data-emoji="🎯">🎯 ¡Esa raya es mía!</button>
-              <button class="btn-reaction" data-text="¡A su mecha, qué tiro!" data-emoji="🔥">🔥 ¡A su mecha!</button>
-              <button class="btn-reaction" data-text="¡Soplale, soplale!" data-emoji="💨">💨 ¡Soplale!</button>
-              <button class="btn-reaction" data-text="¡Mídela con billete!" data-emoji="📏">📏 ¡Mídela!</button>
-              <button class="btn-reaction" data-text="¡El que pierde paga la ronda!" data-emoji="🍺">🍺 ¡Paga la ronda!</button>
+              <button class="btn-reaction" data-text="¡Qué gran tiro!" data-emoji="🔥">🔥 ¡Qué gran tiro!</button>
+              <button class="btn-reaction" data-text="¡Casi en la raya!" data-emoji="✨">✨ ¡Casi en la raya!</button>
+              <button class="btn-reaction" data-text="¡Vamos a medirla!" data-emoji="📏">📏 ¡Mídela!</button>
+              <button class="btn-reaction" data-text="¡Qué buena partida!" data-emoji="🎉">🎉 ¡Buen juego!</button>
             </div>
 
           </div>
@@ -321,18 +321,18 @@
       <div class="victory-header">
         <div class="victory-title-badge">🏆 FIN DE LA PARTIDA 🏆</div>
         <h2>Pabellón de Campeones</h2>
-        <p class="victory-subtitle">El dictamen final de la mesa de cantina</p>
+        <p class="victory-subtitle">El resultado final de la partida</p>
       </div>
 
       <!-- Podium of 1st, 2nd, 3rd -->
       <div id="victory-podium" class="victory-podium-container"></div>
 
       <!-- Other Prizes & Accolades -->
-      <div class="victory-section-title">🎖️ Premios y Distinciones de la Cantina</div>
+      <div class="victory-section-title">🎖️ Premios y Reconocimientos Especiales</div>
       <div id="victory-special-awards" class="victory-awards-grid"></div>
 
       <!-- Full Standings Table -->
-      <div class="victory-section-title">📋 Marcador Final de la Mesa</div>
+      <div class="victory-section-title">📋 Tabla de Posiciones Final</div>
       <div id="victory-stats"></div>
 
       <!-- Action Buttons -->
