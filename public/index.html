@@ -395,10 +395,11 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('sw.js?v=2').catch(() => {});
       });
     }
   </script>
+  <script src="/feria-bridge.js" defer></script>
   <script src="https://pinguxx.github.io/la-feria/feria-bridge.js" defer></script>
 </body>
 </html>

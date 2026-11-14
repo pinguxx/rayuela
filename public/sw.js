@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rayuela-v1';
+const CACHE_NAME = 'rayuela-v2';
 const ASSETS = [
   '/',
   '/index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   '/app.js',
   '/audio.js',
   '/qrcode.min.js',
+  '/feria-bridge.js',
   '/icon.svg',
   '/manifest.json'
 ];
