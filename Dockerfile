@@ -9,13 +9,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config && rm -rf /var/lib/apt/lists/*
 
-# Cache dependencies
+# Copy manifest, lockfile, and source code and build release binary
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
-RUN rm -rf src target/release/deps/rayuela* target/release/rayuela*
-
-# Build actual application
 COPY src ./src
 RUN cargo build --release
 
