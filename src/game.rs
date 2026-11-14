@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::physics::{
-    calculate_bot_throw, simulate_throw, SettledCoin, ThrowSimulationResult,
-    TARGET_LINE_Y,
+    calculate_bot_throw, simulate_throw, SettledCoin, ThrowSimulationResult, TARGET_LINE_Y,
 };
 
 pub const PLAYER_COLORS: [&str; 10] = [
@@ -44,9 +43,21 @@ pub const BOT_PROFILES: [(&str, &str, f32, &str); 7] = [
 ];
 
 pub const COIN_SKINS: [(&str, &str, &str); 4] = [
-    ("centenario", "Centenario de Oro", "50 Pesos Oro / Ángel de la Independencia"),
-    ("diez_pesos", "Diez Pesos Sol", "Piedra del Sol / Bimetálica"),
-    ("plata_zapata", "Plata Zapata", "Plata Ley 0.720 Revolucionaria"),
+    (
+        "centenario",
+        "Centenario de Oro",
+        "50 Pesos Oro / Ángel de la Independencia",
+    ),
+    (
+        "diez_pesos",
+        "Diez Pesos Sol",
+        "Piedra del Sol / Bimetálica",
+    ),
+    (
+        "plata_zapata",
+        "Plata Zapata",
+        "Plata Ley 0.720 Revolucionaria",
+    ),
     ("bronce_cantina", "Ficha de Feria", "Bronce Tradicional"),
 ];
 
@@ -66,12 +77,24 @@ pub struct GameSettings {
     pub knockouts_allowed: bool,
 }
 
-fn default_target_points() -> u32 { 15 }
-fn default_throws_per_player() -> u8 { 2 }
-fn default_turn_timer() -> u64 { 20 }
-fn default_court_theme() -> String { "cajon_barro".to_string() }
-fn default_cantina_theme() -> String { "cajon_barro".to_string() }
-fn default_knockouts() -> bool { true }
+fn default_target_points() -> u32 {
+    15
+}
+fn default_throws_per_player() -> u8 {
+    2
+}
+fn default_turn_timer() -> u64 {
+    20
+}
+fn default_court_theme() -> String {
+    "cajon_barro".to_string()
+}
+fn default_cantina_theme() -> String {
+    "cajon_barro".to_string()
+}
+fn default_knockouts() -> bool {
+    true
+}
 
 impl Default for GameSettings {
     fn default() -> Self {
@@ -245,7 +268,8 @@ impl GameRoom {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            self.turn_deadline_unix_ms = Some(now + 3000 + (self.settings.turn_timer_seconds * 1000));
+            self.turn_deadline_unix_ms =
+                Some(now + 3000 + (self.settings.turn_timer_seconds * 1000));
         } else {
             self.turn_deadline_unix_ms = None;
         }
@@ -281,11 +305,17 @@ impl GameRoom {
         }
 
         let current_player = active.clone();
-        let throw_count = self.throw_number_for_player.entry(player_id.to_string()).or_insert(0);
+        let throw_count = self
+            .throw_number_for_player
+            .entry(player_id.to_string())
+            .or_insert(0);
         *throw_count += 1;
         let this_throw_num = *throw_count;
 
-        let coin_id = format!("coin_{}_{}_{}", self.round_number, player_id, this_throw_num);
+        let coin_id = format!(
+            "coin_{}_{}_{}",
+            self.round_number, player_id, this_throw_num
+        );
 
         let court_theme = if !self.settings.court_theme.is_empty() {
             &self.settings.court_theme
@@ -418,13 +448,10 @@ impl GameRoom {
 
         // Check if any player has met or exceeded target score
         let target = self.settings.target_points;
-        let mut potential_winners: Vec<&Player> = self
-            .players
-            .iter()
-            .filter(|p| p.score >= target)
-            .collect();
+        let mut potential_winners: Vec<&Player> =
+            self.players.iter().filter(|p| p.score >= target).collect();
 
-        potential_winners.sort_by(|a, b| b.score.cmp(&a.score));
+        potential_winners.sort_by_key(|a| std::cmp::Reverse(a.score));
 
         let match_winner_id = if let Some(first) = potential_winners.first() {
             if potential_winners.len() == 1 || first.score > potential_winners[1].score {
@@ -442,22 +469,34 @@ impl GameRoom {
         // Formulate family-friendly round verdict
         let summary_es = if let Some(ref wid) = match_winner_id {
             let winner = self.players.iter().find(|p| &p.id == wid).unwrap();
-            format!("🏆 ¡{} se lleva la victoria con {} puntos! ¡Gran campeonato!", winner.name, winner.score)
+            format!(
+                "🏆 ¡{} se lleva la victoria con {} puntos! ¡Gran campeonato!",
+                winner.name, winner.score
+            )
         } else if had_rayada {
             "🎯 ¡Moneda en la línea! ¡Qué gran puntería!".to_string()
         } else if let Some(ref cname) = closest_player_name {
-            format!("📏 El punto de distancia es para {} ({})", cname, best_dist_display)
+            format!(
+                "📏 El punto de distancia es para {} ({})",
+                cname, best_dist_display
+            )
         } else {
             "💨 Ninguna moneda quedó dentro en esta ronda. ¡Sigue intentando!".to_string()
         };
 
         let summary_en = if let Some(ref wid) = match_winner_id {
             let winner = self.players.iter().find(|p| &p.id == wid).unwrap();
-            format!("🏆 {} wins the match with {} points! Congratulations!", winner.name, winner.score)
+            format!(
+                "🏆 {} wins the match with {} points! Congratulations!",
+                winner.name, winner.score
+            )
         } else if had_rayada {
             "🎯 Coins landed directly on the line! Precision wins!".to_string()
         } else if let Some(ref cname) = closest_player_name {
-            format!("📏 Distance point awarded to {} ({})", cname, best_dist_display)
+            format!(
+                "📏 Distance point awarded to {} ({})",
+                cname, best_dist_display
+            )
         } else {
             "💨 All coins missed the box. Keep trying next round!".to_string()
         };
@@ -493,9 +532,10 @@ impl GameRoom {
 
         // Aggressive bots (like El Charro) check if an opponent coin is near the line to target
         let target_x = if active.name.contains("Charro") {
-            let opponent_coin = self.current_round_coins.iter().find(|c| {
-                c.player_id != active.id && c.is_on_line
-            });
+            let opponent_coin = self
+                .current_round_coins
+                .iter()
+                .find(|c| c.player_id != active.id && c.is_on_line);
             opponent_coin.map(|c| c.x).unwrap_or(0.0)
         } else {
             0.0
@@ -507,9 +547,11 @@ impl GameRoom {
         } else {
             &self.settings.cantina_theme
         };
-        let (angle, power, elevation, spin) = calculate_bot_throw(target_x, target_y, variance, court_theme);
+        let (angle, power, elevation, spin) =
+            calculate_bot_throw(target_x, target_y, variance, court_theme);
 
-        self.execute_player_throw(&active.id, angle, power, elevation, spin).ok()
+        self.execute_player_throw(&active.id, angle, power, elevation, spin)
+            .ok()
     }
 }
 
@@ -519,33 +561,70 @@ impl SettledCoin {
     }
 }
 
-pub fn random_cantina_dicho(is_rayada: bool, is_clavada: bool, is_miss: bool) -> (&'static str, &'static str) {
+pub fn random_cantina_dicho(
+    is_rayada: bool,
+    is_clavada: bool,
+    is_miss: bool,
+) -> (&'static str, &'static str) {
     let mut rng = rand::rng();
     if is_clavada {
         let options = [
-            ("¡Tiro perfecto! ¡Quedó clavada en el barro!", "Perfect shot! Stuck right in the clay!"),
-            ("¡Qué puntería! ¡Clavada maestra de 5 puntos!", "Amazing aim! Master 5-point stick!"),
+            (
+                "¡Tiro perfecto! ¡Quedó clavada en el barro!",
+                "Perfect shot! Stuck right in the clay!",
+            ),
+            (
+                "¡Qué puntería! ¡Clavada maestra de 5 puntos!",
+                "Amazing aim! Master 5-point stick!",
+            ),
         ];
         options[rng.random_range(0..options.len())]
     } else if is_rayada {
         let options = [
-            ("¡Directo en la línea! ¡Tiro de campeón!", "Right on the line! Champion shot!"),
-            ("¡Puntería perfecta! ¡Tocó la raya!", "Perfect accuracy! Touching the line!"),
-            ("¡Excelente lanzamiento! ¡Justo en el centro!", "Excellent throw! Right in the center!"),
+            (
+                "¡Directo en la línea! ¡Tiro de campeón!",
+                "Right on the line! Champion shot!",
+            ),
+            (
+                "¡Puntería perfecta! ¡Tocó la raya!",
+                "Perfect accuracy! Touching the line!",
+            ),
+            (
+                "¡Excelente lanzamiento! ¡Justo en el centro!",
+                "Excellent throw! Right in the center!",
+            ),
         ];
         options[rng.random_range(0..options.len())]
     } else if is_miss {
         let options = [
-            ("¡Uy, se pasó un poquito! ¡La próxima sale mejor!", "Oh, a bit too far! Next one will be better!"),
-            ("¡Casi entra! ¡Ajusta tu fuerza en el siguiente turno!", "Almost in! Adjust your power next turn!"),
-            ("¡Salió fuera de la cancha! ¡No te rindas!", "Out of bounds! Keep trying!"),
+            (
+                "¡Uy, se pasó un poquito! ¡La próxima sale mejor!",
+                "Oh, a bit too far! Next one will be better!",
+            ),
+            (
+                "¡Casi entra! ¡Ajusta tu fuerza en el siguiente turno!",
+                "Almost in! Adjust your power next turn!",
+            ),
+            (
+                "¡Salió fuera de la cancha! ¡No te rindas!",
+                "Out of bounds! Keep trying!",
+            ),
         ];
         options[rng.random_range(0..options.len())]
     } else {
         let options = [
-            ("¡Buen tiro! ¡Quedó muy cerca de la línea!", "Good shot! Very close to the line!"),
-            ("¡Gran lanzamiento! ¡Vamos a medir la distancia!", "Great throw! Let's measure the distance!"),
-            ("¡Bien jugado! ¡Esa moneda está en buena posición!", "Well played! That coin is in a great spot!"),
+            (
+                "¡Buen tiro! ¡Quedó muy cerca de la línea!",
+                "Good shot! Very close to the line!",
+            ),
+            (
+                "¡Gran lanzamiento! ¡Vamos a medir la distancia!",
+                "Great throw! Let's measure the distance!",
+            ),
+            (
+                "¡Bien jugado! ¡Esa moneda está en buena posición!",
+                "Well played! That coin is in a great spot!",
+            ),
         ];
         options[rng.random_range(0..options.len())]
     }

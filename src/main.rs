@@ -12,7 +12,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 
-use crate::game::{BOT_PROFILES, COIN_SKINS, GameSettings, PLAYER_AVATARS, PLAYER_COLORS};
+use crate::game::{GameSettings, BOT_PROFILES, COIN_SKINS, PLAYER_AVATARS, PLAYER_COLORS};
 use crate::ws::{handle_ws_connection, start_background_maintenance, AppState};
 
 async fn health_check_api(State(state): State<AppState>) -> impl IntoResponse {
@@ -114,7 +114,10 @@ async fn main() {
     let app = create_app(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    println!("🪙 Rayuela Mexicana Online iniciando en http://localhost:{}", port);
+    println!(
+        "🪙 Rayuela Mexicana Online iniciando en http://localhost:{}",
+        port
+    );
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,

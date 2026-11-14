@@ -8,8 +8,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::game::{
-    random_cantina_dicho, BOT_PROFILES, GamePhase, GameRoom, GameSettings, Player,
-    PLAYER_AVATARS, PLAYER_COLORS,
+    random_cantina_dicho, GamePhase, GameRoom, GameSettings, Player, BOT_PROFILES, PLAYER_AVATARS,
+    PLAYER_COLORS,
 };
 use crate::physics::{ThrowSimulationResult, TARGET_LINE_Y};
 
@@ -72,6 +72,7 @@ pub enum ClientAction {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerEvent {
     RoomJoined {
         room_code: String,
@@ -155,7 +156,11 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
                     let host = Player {
                         id: player_id.clone(),
-                        name: if name.trim().is_empty() { "Jugador 1".to_string() } else { name },
+                        name: if name.trim().is_empty() {
+                            "Jugador 1".to_string()
+                        } else {
+                            name
+                        },
                         avatar: av,
                         color: cl,
                         coin_skin: skin,
@@ -223,7 +228,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
                         // Check reconnect token
                         if let Some(ref tok) = reconnect_token {
-                            if let Some(existing) = room.players.iter_mut().find(|p| &p.reconnect_token == tok) {
+                            if let Some(existing) =
+                                room.players.iter_mut().find(|p| &p.reconnect_token == tok)
+                            {
                                 existing.is_connected = true;
                                 resolved_player_id = Some(existing.id.clone());
                                 _is_reconnect = true;
@@ -237,7 +244,8 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                             if room.players.len() >= 8 {
                                 let _ = tx.send(Message::Text(
                                     serde_json::to_string(&ServerEvent::Error {
-                                        message: "La sala está llena (máximo 8 jugadores)".to_string(),
+                                        message: "La sala está llena (máximo 8 jugadores)"
+                                            .to_string(),
                                     })
                                     .unwrap()
                                     .into(),
@@ -331,18 +339,30 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::AddBot { bot_profile_name }) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
-                            if room.host_id == *pid && room.phase == GamePhase::Lobby && room.players.len() < 8 {
-                                let existing_names: Vec<&str> = room.players.iter().map(|p| p.name.as_str()).collect();
-                                let available_profiles: Vec<&(&str, &str, f32, &str)> = BOT_PROFILES
-                                    .iter()
-                                    .filter(|(name, _, _, _)| !existing_names.iter().any(|en| en.contains(name)))
-                                    .collect();
+                            if room.host_id == *pid
+                                && room.phase == GamePhase::Lobby
+                                && room.players.len() < 8
+                            {
+                                let existing_names: Vec<&str> =
+                                    room.players.iter().map(|p| p.name.as_str()).collect();
+                                let available_profiles: Vec<&(&str, &str, f32, &str)> =
+                                    BOT_PROFILES
+                                        .iter()
+                                        .filter(|(name, _, _, _)| {
+                                            !existing_names.iter().any(|en| en.contains(name))
+                                        })
+                                        .collect();
 
                                 let chosen_profile = if let Some(ref bp) = bot_profile_name {
-                                    BOT_PROFILES.iter().find(|(name, _, _, _)| name == bp).copied()
+                                    BOT_PROFILES
+                                        .iter()
+                                        .find(|(name, _, _, _)| name == bp)
+                                        .copied()
                                 } else if !available_profiles.is_empty() {
                                     let mut rng = rand::rng();
                                     let idx = rng.random_range(0..available_profiles.len());
@@ -353,15 +373,22 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                                     Some(BOT_PROFILES[idx])
                                 };
 
-                                let (b_name, b_avatar, _b_var, b_color) = chosen_profile.unwrap_or(BOT_PROFILES[0]);
+                                let (b_name, b_avatar, _b_var, b_color) =
+                                    chosen_profile.unwrap_or(BOT_PROFILES[0]);
 
-                                let used_colors: Vec<String> = room.players.iter().map(|p| p.color.clone()).collect();
-                                let bot_color = if !used_colors.iter().any(|c| c.eq_ignore_ascii_case(b_color)) {
+                                let used_colors: Vec<String> =
+                                    room.players.iter().map(|p| p.color.clone()).collect();
+                                let bot_color = if !used_colors
+                                    .iter()
+                                    .any(|c| c.eq_ignore_ascii_case(b_color))
+                                {
                                     b_color.to_string()
                                 } else {
                                     PLAYER_COLORS
                                         .iter()
-                                        .find(|c| !used_colors.iter().any(|u| u.eq_ignore_ascii_case(c)))
+                                        .find(|c| {
+                                            !used_colors.iter().any(|u| u.eq_ignore_ascii_case(c))
+                                        })
                                         .copied()
                                         .unwrap_or(b_color)
                                         .to_string()
@@ -406,7 +433,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::RemoveBot { bot_id }) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             if room.host_id == *pid && room.phase == GamePhase::Lobby {
@@ -419,7 +448,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::UpdateSettings { settings }) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             if room.host_id == *pid && room.phase == GamePhase::Lobby {
@@ -432,7 +463,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::StartGame) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             if room.host_id == *pid && room.phase == GamePhase::Lobby {
@@ -459,11 +492,19 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                     elevation_deg,
                     spin,
                 }) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             let player = room.players.iter().find(|p| &p.id == pid).cloned();
-                            match room.execute_player_throw(pid, angle_deg, power, elevation_deg, spin) {
+                            match room.execute_player_throw(
+                                pid,
+                                angle_deg,
+                                power,
+                                elevation_deg,
+                                spin,
+                            ) {
                                 Ok(sim) => {
                                     let (d_es, d_en) = random_cantina_dicho(
                                         sim.coin.is_on_line,
@@ -473,10 +514,22 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
                                     let ev = ServerEvent::ThrowExecuted {
                                         player_id: pid.clone(),
-                                        player_name: player.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
-                                        avatar: player.as_ref().map(|p| p.avatar.clone()).unwrap_or_default(),
-                                        color: player.as_ref().map(|p| p.color.clone()).unwrap_or_default(),
-                                        coin_skin: player.as_ref().map(|p| p.coin_skin.clone()).unwrap_or_default(),
+                                        player_name: player
+                                            .as_ref()
+                                            .map(|p| p.name.clone())
+                                            .unwrap_or_default(),
+                                        avatar: player
+                                            .as_ref()
+                                            .map(|p| p.avatar.clone())
+                                            .unwrap_or_default(),
+                                        color: player
+                                            .as_ref()
+                                            .map(|p| p.color.clone())
+                                            .unwrap_or_default(),
+                                        coin_skin: player
+                                            .as_ref()
+                                            .map(|p| p.coin_skin.clone())
+                                            .unwrap_or_default(),
                                         sim,
                                         dicho_es: d_es.to_string(),
                                         dicho_en: d_en.to_string(),
@@ -524,19 +577,27 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::NextRound) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
-                            if (room.host_id == *pid || room.players.iter().all(|p| p.is_bot || p.id == *pid))
+                            if (room.host_id == *pid
+                                || room.players.iter().all(|p| p.is_bot || p.id == *pid))
                                 && room.phase == GamePhase::RoundReview
                             {
                                 room.round_number += 1;
                                 room.start_new_round();
-                                if room.current_active_player().map(|p| p.is_bot).unwrap_or(false) {
+                                if room
+                                    .current_active_player()
+                                    .map(|p| p.is_bot)
+                                    .unwrap_or(false)
+                                {
                                     let now = std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()
-                                        .as_millis() as u64;
+                                        .as_millis()
+                                        as u64;
                                     room.min_next_throw_unix_ms = now + 900;
                                 }
                                 drop(rooms);
@@ -547,7 +608,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::PlayAgain) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let mut rooms = state.rooms.write().await;
                         if let Some(room) = rooms.get_mut(code) {
                             if room.host_id == *pid && room.phase == GamePhase::MatchFinished {
@@ -560,7 +623,9 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
                 }
 
                 Ok(ClientAction::SendReaction { text, emoji }) => {
-                    if let (Some(ref code), Some(ref pid)) = (&current_room_code, &current_player_id) {
+                    if let (Some(ref code), Some(ref pid)) =
+                        (&current_room_code, &current_player_id)
+                    {
                         let rooms = state.rooms.read().await;
                         if let Some(room) = rooms.get(code) {
                             if let Some(p) = room.players.iter().find(|p| &p.id == pid) {
@@ -655,7 +720,10 @@ pub fn start_background_maintenance(state: AppState) {
                             continue;
                         }
 
-                        let is_bot = room.current_active_player().map(|p| p.is_bot).unwrap_or(false);
+                        let is_bot = room
+                            .current_active_player()
+                            .map(|p| p.is_bot)
+                            .unwrap_or(false);
                         let is_timed_out = room
                             .turn_deadline_unix_ms
                             .map(|deadline| now > deadline)
@@ -667,21 +735,35 @@ pub fn start_background_maintenance(state: AppState) {
                             let active_player = room.current_active_player().cloned();
                             if let Some(player) = active_player {
                                 let (angle, power, elevation, spin) = if player.is_bot {
-                                    let variance = player.bot_profile_id.as_ref().and_then(|id| {
-                                        BOT_PROFILES.iter().find(|(name, _, _, _)| name == id).map(|(_, _, v, _)| *v)
-                                    }).unwrap_or(0.03);
+                                    let variance = player
+                                        .bot_profile_id
+                                        .as_ref()
+                                        .and_then(|id| {
+                                            BOT_PROFILES
+                                                .iter()
+                                                .find(|(name, _, _, _)| name == id)
+                                                .map(|(_, _, v, _)| *v)
+                                        })
+                                        .unwrap_or(0.03);
                                     let c_theme = if !room.settings.court_theme.is_empty() {
                                         &room.settings.court_theme
                                     } else {
                                         &room.settings.cantina_theme
                                     };
-                                    crate::physics::calculate_bot_throw(0.0, TARGET_LINE_Y, variance, c_theme)
+                                    crate::physics::calculate_bot_throw(
+                                        0.0,
+                                        TARGET_LINE_Y,
+                                        variance,
+                                        c_theme,
+                                    )
                                 } else {
                                     // AFK Auto-toss: safe throw towards the center line
                                     (0.0, 0.53, 32.0, 0.0)
                                 };
 
-                                if let Ok(sim) = room.execute_player_throw(&player.id, angle, power, elevation, spin) {
+                                if let Ok(sim) = room
+                                    .execute_player_throw(&player.id, angle, power, elevation, spin)
+                                {
                                     let (d_es, d_en) = random_cantina_dicho(
                                         sim.coin.is_on_line,
                                         sim.was_clavada,
@@ -717,9 +799,11 @@ pub fn start_background_maintenance(state: AppState) {
                     tokio::time::sleep(Duration::from_millis(2400)).await;
                     if let Some(r) = room_after {
                         if round_ended {
-                            broadcast_event(&state, &code, &ServerEvent::RoundFinished { room: r }).await;
+                            broadcast_event(&state, &code, &ServerEvent::RoundFinished { room: r })
+                                .await;
                         } else if match_ended {
-                            broadcast_event(&state, &code, &ServerEvent::MatchFinished { room: r }).await;
+                            broadcast_event(&state, &code, &ServerEvent::MatchFinished { room: r })
+                                .await;
                         } else {
                             broadcast_room_state(&state, &code).await;
                         }
