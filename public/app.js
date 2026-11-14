@@ -465,6 +465,22 @@
 
         ws.onclose = () => {
             console.log("WebSocket closed");
+            if (currentRoom && currentRoom.room_code && myReconnectToken) {
+                const code = currentRoom.room_code;
+                const tok = myReconnectToken;
+                const myP = currentRoom.players && currentRoom.players.find(p => p.id === myPlayerId);
+                const pName = (myP && myP.name) || (elPlayerName && elPlayerName.value.trim()) || 'Jugador';
+                setTimeout(() => {
+                    if (currentRoom && currentRoom.room_code === code && (!ws || ws.readyState === WebSocket.CLOSED)) {
+                        sendWsAction({
+                            action: 'join_room',
+                            room_code: code,
+                            name: pName,
+                            reconnect_token: tok
+                        });
+                    }
+                }, 1500);
+            }
         };
 
         ws.onerror = (err) => {
@@ -485,15 +501,19 @@
 
     function handleServerEvent(ev) {
         switch (ev.type) {
-            case 'room_joined':
+            case 'room_joined': {
+                const wasAlreadyInRoom = currentRoom && currentRoom.room_code === ev.room_code;
                 myPlayerId = ev.player_id;
                 myReconnectToken = ev.reconnect_token;
                 isHost = ev.is_host;
                 localStorage.setItem(`rayuela_rec_${ev.room_code}`, ev.reconnect_token);
                 elRoomBadge.style.display = 'flex';
                 elRoomBadgeCode.textContent = ev.room_code;
-                showToast(`Te uniste a la sala ${ev.room_code}`);
+                if (!wasAlreadyInRoom) {
+                    showToast(`Te uniste a la sala ${ev.room_code}`);
+                }
                 break;
+            }
 
             case 'room_state': {
                 const prevRoom = currentRoom;

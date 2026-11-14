@@ -115,11 +115,27 @@ pub async fn handle_ws_connection(socket: WebSocket, state: AppState) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
-    // Spawn task to forward outgoing channel messages to the WebSocket client
+    // Spawn task to forward outgoing channel messages and send 25s keepalive pings for Render/Cloudflare proxies
     let forward_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if ws_sender.send(msg).await.is_err() {
-                break;
+        let mut ping_interval = tokio::time::interval(Duration::from_secs(25));
+        ping_interval.tick().await; // skip immediate first tick
+        loop {
+            tokio::select! {
+                msg_opt = rx.recv() => {
+                    match msg_opt {
+                        Some(msg) => {
+                            if ws_sender.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if ws_sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
